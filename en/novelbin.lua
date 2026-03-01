@@ -1,9 +1,9 @@
 -- NovelBin source plugin
--- Based on the original Kotlin implementation
+-- Compatible with LuaJ (Lua 5.1) — no goto, no colon methods on table fields
 
 id       = "NovelBin"
-name     = "Novel Bin"
-version  = "1.0.1"
+name     = "NovelBin"
+version  = "1.0.2"
 baseUrl  = "https://novelbin.com/"
 language = "en"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/novelbin.png"
@@ -33,12 +33,10 @@ local function parseCatalogItems(body)
   local rows = html_select(body, ".col-novel-main .row")
   for _, row in ipairs(rows) do
     local titleEls = html_select(row.html, ".novel-title a")
-    local coverEls = html_select(row.html, "img[data-src]")
     if titleEls[1] then
-      local cover = ""
-      if coverEls[1] then
-        cover = coverEls[1]:attr("data-src")
-        if cover == "" then cover = coverEls[1].src end
+      local cover = html_attr(row.html, "img[data-src]", "data-src")
+      if cover == "" then
+        cover = html_attr(row.html, "img[src]", "src")
       end
       table.insert(items, {
         title = string_trim(titleEls[1].text),
@@ -56,7 +54,7 @@ function getCatalogList(index)
   local url = buildCatalogUrl(index)
   local r = http_get(url)
   if not r.success then
-    log_error("getCatalogList failed: " .. url .. " code=" .. r.code)
+    log_error("getCatalogList failed: " .. url .. " code=" .. tostring(r.code))
     return { items = {}, hasNext = false }
   end
   local items = parseCatalogItems(r.body)
@@ -70,17 +68,16 @@ function getCatalogSearch(index, query)
     log_error("getCatalogSearch failed: " .. url)
     return { items = {}, hasNext = false }
   end
-  -- Search page uses different img selector (src instead of data-src)
   local items = {}
   local rows = html_select(r.body, ".col-novel-main .row")
   for _, row in ipairs(rows) do
     local titleEls = html_select(row.html, ".novel-title a")
-    local coverEls = html_select(row.html, "img[src]")
     if titleEls[1] then
+      local cover = html_attr(row.html, "img[src]", "src")
       table.insert(items, {
         title = string_trim(titleEls[1].text),
         url   = titleEls[1].href,
-        cover = coverEls[1] and coverEls[1].src or ""
+        cover = cover
       })
     end
   end
@@ -92,72 +89,71 @@ end
 function getBookTitle(bookUrl)
   local r = http_get(bookUrl)
   if not r.success then return nil end
-  local el = html_select(r.body, "h3.title")
-  return el[1] and string_trim(el[1].text) or nil
+  local el = html_select_first(r.body, "h3.title")
+  if el then return string_trim(el.text) end
+  return nil
 end
 
 function getBookCoverImageUrl(bookUrl)
   local r = http_get(bookUrl)
   if not r.success then return nil end
-  local el = html_select(r.body, "meta[property='og:image']")
-  return el[1] and el[1]:attr("content") or nil
+  local url = html_attr(r.body, "meta[property='og:image']", "content")
+  if url ~= "" then return url end
+  return nil
 end
 
 function getBookDescription(bookUrl)
   local r = http_get(bookUrl)
   if not r.success then return nil end
-  local el = html_select(r.body, "div.desc-text")
-  return el[1] and string_trim(el[1].text) or nil
+  local el = html_select_first(r.body, "div.desc-text")
+  if el then return string_trim(el.text) end
+  return nil
 end
 
 function getChapterListHash(bookUrl)
   local r = http_get(bookUrl)
   if not r.success then return nil end
-  local el = html_select(r.body, ".l-chapter a.chapter-title")
-  return el[1] and el[1].href or nil
+  local el = html_select_first(r.body, ".l-chapter a.chapter-title")
+  if el then return el.href end
+  return nil
 end
 
 -- ── Chapter list (AJAX) ───────────────────────────────────────────────────────
 
 function getChapterList(bookUrl)
-  -- Step 1: get novelId from og:url meta tag
   local r = http_get(bookUrl)
   if not r.success then
-    log_error("getChapterList: failed to load book page " .. bookUrl)
+    log_error("getChapterList: failed to load " .. bookUrl)
     return {}
   end
 
-  local metas = html_select(r.body, "meta[property='og:url']")
-  if not metas[1] then
-    log_error("getChapterList: no og:url meta on " .. bookUrl)
+  local ogUrl = html_attr(r.body, "meta[property='og:url']", "content")
+  if ogUrl == "" then
+    log_error("getChapterList: no og:url meta")
     return {}
   end
 
-  local ogUrl = metas[1]:attr("content")
-  -- Extract last path segment as novelId  e.g. ".../novel/some-novel-slug" → "some-novel-slug"
-  local novelId = regex_match(ogUrl, "/([^/?#]+)/*$")
-  if not novelId[1] then
-    log_error("getChapterList: cannot extract novelId from og:url=" .. ogUrl)
+  local m = regex_match(ogUrl, "/([^/?#]+)/*$")
+  if not m[1] then
+    log_error("getChapterList: cannot extract novelId from " .. ogUrl)
     return {}
   end
 
-  -- Step 2: AJAX chapter list
-  local ajaxUrl = "https://novelbin.com/ajax/chapter-archive?novelId=" .. novelId[1]
-  log_info("getChapterList: AJAX url=" .. ajaxUrl)
+  local ajaxUrl = "https://novelbin.com/ajax/chapter-archive?novelId=" .. m[1]
+  log_info("getChapterList AJAX: " .. ajaxUrl)
 
   local ar = http_get(ajaxUrl)
   if not ar.success then
-    log_error("getChapterList: AJAX failed, code=" .. ar.code)
+    log_error("getChapterList: AJAX failed code=" .. tostring(ar.code))
     return {}
   end
 
   local chapters = {}
   local links = html_select(ar.body, "ul.list-chapter li a")
   for _, a in ipairs(links) do
-    table.insert(chapters, {
-      title = string_trim(a:attr("title") ~= "" and a:attr("title") or a.text),
-      url   = a.href
-    })
+    local title = string_trim(a.text)
+    if title == "" then title = a.href end
+    table.insert(chapters, { title = title, url = a.href })
   end
 
   log_info("getChapterList: loaded " .. #chapters .. " chapters")
@@ -167,16 +163,14 @@ end
 -- ── Chapter text ──────────────────────────────────────────────────────────────
 
 function getChapterText(html)
-  -- Remove ads and noise
   local cleaned = html_remove(html, "script", ".ads", "h3", ".chapter-warning", ".ad-insert")
-  local content = html_select(cleaned, "#chr-content")
-  if content[1] then
-    return html_text(content[1].html)
-  end
-  -- Fallback selectors
-  local fallback = html_select(cleaned, ".chr-c, #chapter-content, .chapter-content")
-  if fallback[1] then
-    return html_text(fallback[1].html)
-  end
+  local el = html_select_first(cleaned, "#chr-content")
+  if el then return html_text(el.html) end
+  el = html_select_first(cleaned, ".chr-c")
+  if el then return html_text(el.html) end
+  el = html_select_first(cleaned, "#chapter-content")
+  if el then return html_text(el.html) end
+  el = html_select_first(cleaned, ".chapter-content")
+  if el then return html_text(el.html) end
   return ""
 end
