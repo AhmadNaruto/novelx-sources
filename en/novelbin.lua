@@ -2,13 +2,14 @@
 -- Compatible with LuaJ (Lua 5.1) — no goto, no colon methods on table fields
 
 id       = "NovelBin"
-name     = "Novel Bin"
-version  = "1.0.5"
+name     = "NovelBin"
+version  = "1.0.6"
 baseUrl  = "https://novelbin.com/"
 language = "en"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/novelbin.png"
 
 -- ── Helpers ───────────────────────────────────────────────────────────────────
+
 local function transformCoverUrl(coverUrl)
   -- NovelBin использует thumbnail в URL, заменяем на полные обложки
   if coverUrl:find("novel_200_89") then
@@ -48,7 +49,7 @@ local function parseCatalogItems(body)
       table.insert(items, {
         title = string_trim(titleEls[1].text),
         url   = titleEls[1].href,
-        cover = transformCoverUrl(cover)
+        cover = cover
       })
     end
   end
@@ -84,7 +85,7 @@ function getCatalogSearch(index, query)
       table.insert(items, {
         title = string_trim(titleEls[1].text),
         url   = titleEls[1].href,
-        cover = transformCoverUrl(cover)
+        cover = cover
       })
     end
   end
@@ -105,7 +106,9 @@ function getBookCoverImageUrl(bookUrl)
   local r = http_get(bookUrl)
   if not r.success then return nil end
   local url = html_attr(r.body, "meta[property='og:image']", "content")
-  if url ~= "" then return url end
+  if url ~= "" then 
+    return transformCoverUrl(url) 
+  end
   return nil
 end
 
@@ -140,7 +143,7 @@ function getChapterList(bookUrl)
     return {}
   end
 
-  local m = regex_match(ogUrl, "([^/?#]+)/*$")
+  local m = regex_match(ogUrl, "/([^/?#]+)/*$")
   if not m[1] then
     log_error("getChapterList: cannot extract novelId from " .. ogUrl)
     return {}
