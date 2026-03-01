@@ -3,7 +3,7 @@
 
 id       = "shuba69"
 name     = "69Shuba"
-version  = "1.0.3"
+version  = "1.0.4"
 baseUrl  = "https://www.69shuba.com/"
 language = "zh"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/69shuba.png"
@@ -18,7 +18,7 @@ end
 
 function getCatalogList(index)
   local url = buildCatalogUrl(index)
-  -- В твоем API кодировка передается строкой вторым аргументом в http_get
+  -- Согласно твоему LuaEngine, http_get принимает url и опционально charset строкой
   local r = http_get(url, "GBK")
   
   if not r.success then
@@ -27,11 +27,15 @@ function getCatalogList(index)
   end
 
   local items = {}
+  -- Используем html_select напрямую (он проброшен в LuaEngine через TwoArgFunction)
   local rows = html_select(r.body, "ul#article_list_content li")
   for _, row in ipairs(rows) do
+    -- Доступ к html внутри элемента через row.html
     local titleEls = html_select(row.html, "div.newnav h3 a")
     if titleEls[1] then
       local cover = html_attr(row.html, "a.imgbox img", "data-src")
+      if cover == "" then cover = html_attr(row.html, "a.imgbox img", "src") end
+      
       table.insert(items, {
         title = string_trim(titleEls[1].text),
         url   = titleEls[1].href,
@@ -46,9 +50,10 @@ function getCatalogSearch(index, query)
   if index > 0 then return { items = {}, hasNext = false } end
 
   local searchUrl = "https://www.69shuba.com/modules/article/search.php"
-  -- Используем стандартный url_encode, так как спец. функции для GBK в примере нет
+  -- url_encode проброшен как OneArgFunction
   local payload = "searchkey=" .. url_encode(query) .. "&searchtype=all"
   
+  -- В LuaEngine http_post(url, body, options_table)
   local r = http_post(searchUrl, payload, {
     headers = { ["Content-Type"] = "application/x-www-form-urlencoded" },
     charset = "GBK"
@@ -112,7 +117,7 @@ end
 -- ── Chapter list ──────────────────────────────────────────────────────────────
 
 function getChapterList(bookUrl)
-  -- Трансформация URL через gsub (как в твоем примере с NovelBin)
+  -- gsub — стандартная функция Lua 5.1, поддерживается LuaJ
   local listUrl = bookUrl:gsub("/txt/", "/"):gsub("%.htm", "/")
   
   local r = http_get(listUrl, "GBK")
@@ -121,7 +126,7 @@ function getChapterList(bookUrl)
   local chapters = {}
   local links = html_select(r.body, "div#catalog ul li a")
   
-  -- На сайте новые главы в начале, инвертируем
+  -- Инвертируем список (с сайта идет от новых к старым)
   for i = #links, 1, -1 do
     local a = links[i]
     table.insert(chapters, {
@@ -135,6 +140,7 @@ end
 -- ── Chapter text ──────────────────────────────────────────────────────────────
 
 function getChapterText(html)
+  -- html_remove проброшен как VarArgFunction
   local cleaned = html_remove(html, "h1", "div.txtinfo", "div.bottom-ad", "div.bottem2", ".visible-xs", "script")
   local el = html_select_first(cleaned, "div.txtnav")
   if el then return html_text(el.html) end
