@@ -3,22 +3,19 @@
 
 id       = "NovelBin"
 name     = "Novel Bin"
-version  = "1.0.8"
+version  = "1.0.9"
 baseUrl  = "https://novelbin.com/"
 language = "en"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/novelbin.png"
 
 -- ── Helpers ───────────────────────────────────────────────────────────────────
-local function transformCoverUrl(coverUrl)
-  -- Принудительно приводим к строке, чтобы gsub точно отработал
-  local url = tostring(coverUrl or "")
-  if url:find("novel_200_89") then
-    -- Используем plain-поиск (true), чтобы исключить проблемы с экранированием
-    local newUrl = url:gsub("novel_200_89", "novel")
-    return newUrl
+local function transformCoverUrl(coverUrl, bookUrl)
+  if not bookUrl or bookUrl == "" then return coverUrl end
+  local slug = bookUrl:match("([^/]+)%.html$") or bookUrl:match("([^/]+)$")
+  if slug then
+    return "https://images.novelbin.me/novel/" .. slug .. ".jpg"
   end
-  
-  return url
+  return coverUrl
 end
 
 local function buildCatalogUrl(index)
