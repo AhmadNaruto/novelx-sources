@@ -1,12 +1,12 @@
 -- NovelBin source plugin
 -- Compatible with LuaJ (Lua 5.1) — no goto, no colon methods on table fields
 
-id       = "NovelBin"
-name     = "Novel Bin"
-version  = "1.1.0"
-baseUrl  = "https://novelbin.com/"
-language = "en"
-icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/novelbin.png"
+id        = "NovelBin"
+name      = "Novel Bin"
+version   = "1.1.1"
+baseUrl   = "https://novelbin.com/"
+language  = "en"
+icon      = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/novelbin.png"
 
 -- ── Helpers ───────────────────────────────────────────────────────────────────
 local function transformCoverUrl(coverUrl, bookUrl)
@@ -42,14 +42,15 @@ local function parseCatalogItems(body)
   for _, row in ipairs(rows) do
     local titleEls = html_select(row.html, ".novel-title a")
     if titleEls[1] then
+      local currentUrl = titleEls[1].href
       local cover = html_attr(row.html, "img[data-src]", "data-src")
       if cover == "" then
         cover = html_attr(row.html, "img[src]", "src")
       end
       table.insert(items, {
         title = string_trim(titleEls[1].text),
-        url   = titleEls[1].href,
-        cover = transformCoverUrl(cover, bookUrl)
+        url   = currentUrl,
+        cover = transformCoverUrl(cover, currentUrl)
       })
     end
   end
@@ -81,11 +82,12 @@ function getCatalogSearch(index, query)
   for _, row in ipairs(rows) do
     local titleEls = html_select(row.html, ".novel-title a")
     if titleEls[1] then
+      local currentUrl = titleEls[1].href
       local cover = html_attr(row.html, "img[src]", "src")
       table.insert(items, {
         title = string_trim(titleEls[1].text),
-        url   = titleEls[1].href,
-        cover = transformCoverUrl(cover, bookUrl)
+        url   = currentUrl,
+        cover = transformCoverUrl(cover, currentUrl)
       })
     end
   end
