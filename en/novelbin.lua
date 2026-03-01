@@ -3,7 +3,7 @@
 
 id       = "NovelBin"
 name     = "NovelBin"
-version  = "1.0.6"
+version  = "1.0.7"
 baseUrl  = "https://novelbin.com/"
 language = "en"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/novelbin.png"
@@ -46,6 +46,10 @@ local function parseCatalogItems(body)
       if cover == "" then
         cover = html_attr(row.html, "img[src]", "src")
       end
+      -- Применяем трансформер к обложке
+      if cover ~= "" then
+        cover = transformCoverUrl(cover)
+      end
       table.insert(items, {
         title = string_trim(titleEls[1].text),
         url   = titleEls[1].href,
@@ -82,6 +86,10 @@ function getCatalogSearch(index, query)
     local titleEls = html_select(row.html, ".novel-title a")
     if titleEls[1] then
       local cover = html_attr(row.html, "img[src]", "src")
+      -- Применяем трансформер к обложке
+      if cover ~= "" then
+        cover = transformCoverUrl(cover)
+      end
       table.insert(items, {
         title = string_trim(titleEls[1].text),
         url   = titleEls[1].href,
