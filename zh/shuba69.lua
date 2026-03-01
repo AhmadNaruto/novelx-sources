@@ -1,13 +1,13 @@
 -- Shuba69 Lua Plugin
--- Migrated from Kotlin native source (GBK encoding, POST search)
+-- Fixed for LuaJ top-level visibility
 
 id       = "shuba69"
 name     = "69Shuba"
-version  = "1.0.1"
+version  = "1.0.2"
 language = "zh"
 baseUrl  = "https://www.69shuba.com"
 
--- ── Catalog ───────────────────────────────────────────────────────────────────
+-- ── Каталог ──────────────────────────────────────────────────────────────────
 
 function getCatalogList(index)
     local url = "https://www.69shuba.com/novels/monthvisit_0_0_" .. tostring(index + 1) .. ".htm"
@@ -33,11 +33,14 @@ function getCatalogList(index)
     return { items = books, hasNext = #books > 0 }
 end
 
+-- ── Поиск ────────────────────────────────────────────────────────────────────
+
 function getCatalogSearch(index, input)
     if index > 0 then return { items = {}, hasNext = false } end
     
     local searchUrl = "https://www.69shuba.com/modules/article/search.php"
-    local body = "searchkey=" .. url_encode_charset(input, "GBK") .. "&searchtype=all"
+    local encodedQuery = url_encode_charset(input, "GBK")
+    local body = "searchkey=" .. encodedQuery .. "&searchtype=all"
     
     local res = http_post(searchUrl, body, {
         charset = "GBK",
@@ -65,7 +68,7 @@ function getCatalogSearch(index, input)
     return { items = books, hasNext = false }
 end
 
--- ── Book Details ─────────────────────────────────────────────────────────────
+-- ── Детали книги ─────────────────────────────────────────────────────────────
 
 function getBookTitle(url)
     local res = http_get(url, { charset = "GBK" })
@@ -87,10 +90,9 @@ function getBookDescription(url)
     return el and string_trim(el.text) or nil
 end
 
--- ── Chapters ──────────────────────────────────────────────────────────────────
+-- ── Главы ────────────────────────────────────────────────────────────────────
 
 function getChapterList(url)
-    -- Трансформация URL через regex_replace (без двоеточий)
     local listUrl = regex_replace(url, "/txt/", "/")
     listUrl = regex_replace(listUrl, "%.htm", "/")
 
@@ -100,7 +102,6 @@ function getChapterList(url)
     local links = html_select(res.body, "div#catalog ul li a")
     local chapters = {}
     
-    -- Инвертируем список (от старых к новым)
     for i = #links, 1, -1 do
         table.insert(chapters, {
             title = string_trim(links[i].text),
@@ -111,10 +112,8 @@ function getChapterList(url)
 end
 
 function getChapterText(html)
-    -- Очистка контента
     local cleaned = html_remove(html, "h1", "div.txtinfo", "div.bottom-ad", "div.bottem2", ".visible-xs", "script")
     local content = html_select_first(cleaned, "div.txtnav")
-    
     return content and html_text(content.html) or ""
 end
 
