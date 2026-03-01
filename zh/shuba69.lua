@@ -1,7 +1,7 @@
 -- ── Метаданные ───────────────────────────────────────────────────────────────
 id       = "shuba69"
 name     = "69shuba"
-version  = "1.0.5"
+version  = "1.0.6"
 baseUrl  = "https://www.69shuba.com/"
 language = "zh"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/69shuba.png"
@@ -87,34 +87,45 @@ end
 -- ── Список глав ──────────────────────────────────────────────────────────────
 
 function getChapterList(bookUrl)
-    -- Логика из Kotlin: замена /txt/A43616.htm -> /A43616/
-    local chapterListUrl = regex_replace(bookUrl, "/txt/", "/")
-    chapterListUrl = regex_replace(chapterListUrl, "%.htm", "/")
-
-    local r = http_get(chapterListUrl, { charset = "GBK" })
-    if not r.success then return {} end
-
-    local chapters = {}
-    local elements = html_select(r.body, "div#catalog ul li a")
+    local chapterListUrl = bookUrl:gsub("/txt/", "/"):gsub("%.htm", "/")
     
-    -- Сайт отдает новые главы первыми, инвертируем для правильного порядка
-    for i = #elements, 1, -1 do
-        local a = elements[i]
-        table.insert(chapters, {
-            title = string_trim(a.text),
-            url   = a.href
-        })
+    -- 2. Запрос с правильной кодировкой
+    local r = http_get(chapterListUrl, "GBK")
+    
+    if not r.success then
+        log_error("getChapterList failed: " .. chapterListUrl)
+        return {}
     end
 
+    local chapters = {}
+    -- 3. Селектор div#catalog ul li a
+    local links = html_select(r.body, "div#catalog ul li a")
+    
+    -- 4. Инверсия (asReversed), так как на сайте новые главы сверху
+    for i = #links, 1, -1 do
+        local a = links[i]
+        local title = string_trim(a.text)
+        
+        if title ~= "" then
+            table.insert(chapters, {
+                title = title,
+                url   = a.href
+            })
+        end
+    end
+    
+    log_info("Loaded chapters: " .. #chapters)
     return chapters
 end
 
+-- ── Хеш списка глав (для отслеживания обновлений) ─────────────────────────────
+
 function getChapterListHash(bookUrl)
-    local r = http_get(bookUrl, { charset = "GBK" })
-    if not r.success then return nil end
-    -- Используем текст инфо-листа (там обычно дата или глава)
-    local el = html_select_first(r.body, ".infolist li:nth-child(2)")
-    return el and el.text or nil
+    -- Берем последнюю главу как индикатор обновления
+    local r = http_get(bookUrl, "GBK")
+    if not r.success then return "" end
+    local el = html_select_first(r.body, "div#catalog ul li a")
+    return el and el.href or ""
 end
 
 -- ── Текст главы ──────────────────────────────────────────────────────────────
