@@ -1,7 +1,7 @@
 ﻿-- ── Метаданные ────────────────────────────────────────────────────────────────
 id        = "NovelBin"
 name      = "Novel Bin"
-version   = "1.1.1"
+version   = "1.0.3"
 baseUrl   = "https://novelbin.com/"
 language  = "en"
 icon      = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/novelbin.png"
@@ -167,4 +167,131 @@ function getChapterText(html)
   local el = html_select_first(cleaned, "#chr-content")
   if not el then return "" end
   return applyStandardContentTransforms(html_text(el.html))
+end
+
+-- ── Жанры книги ───────────────────────────────────────────────────────────────
+
+function getBookGenres(bookUrl)
+  local r = http_get(bookUrl)
+  if not r.success then return {} end
+  local genres = {}
+  for _, li in ipairs(html_select(r.body, "ul.info.info-meta li, ul.info-meta li")) do
+    local h3 = html_select_first(li.html, "h3")
+    if h3 and string_trim(h3.text) == "Genre:" then
+      for _, a in ipairs(html_select(li.html, "a")) do
+        local g = string_trim(a.text)
+        if g ~= "" then table.insert(genres, g) end
+      end
+      break
+    end
+  end
+  return genres
+end
+
+-- ── Список фильтров ───────────────────────────────────────────────────────────
+
+function getFilterList()
+  return {
+    {
+      type         = "select",
+      key          = "type",
+      label        = "Novel Listing",
+      defaultValue = "sort/top-view-novel",
+      options = {
+        { value = "sort/top-view-novel", label = "Most Popular"    },
+        { value = "sort/top-hot-novel",  label = "Hot Novel"       },
+        { value = "sort/completed",      label = "Completed Novel" },
+      }
+    },
+    {
+      type         = "select",
+      key          = "status",
+      label        = "Status",
+      defaultValue = "",
+      options = {
+        { value = "",  label = "All"       },
+        { value = "1", label = "Ongoing"   },
+        { value = "2", label = "Completed" },
+      }
+    },
+    {
+      type        = "checkbox",
+      key         = "genre",
+      label       = "Genre",
+      multiselect = false,
+      options = {
+        { value = "action",         label = "Action"         },
+        { value = "adventure",      label = "Adventure"      },
+        { value = "anime-&-comics", label = "Anime & Comics" },
+        { value = "comedy",         label = "Comedy"         },
+        { value = "drama",          label = "Drama"          },
+        { value = "eastern",        label = "Eastern"        },
+        { value = "fan-fiction",    label = "Fan-fiction"    },
+        { value = "fantasy",        label = "Fantasy"        },
+        { value = "game",           label = "Game"           },
+        { value = "gender-bender",  label = "Gender Bender"  },
+        { value = "harem",          label = "Harem"          },
+        { value = "historical",     label = "Historical"     },
+        { value = "horror",         label = "Horror"         },
+        { value = "isekai",         label = "Isekai"         },
+        { value = "josei",          label = "Josei"          },
+        { value = "litrpg",         label = "LitRPG"         },
+        { value = "magic",          label = "Magic"          },
+        { value = "martial-arts",   label = "Martial Arts"   },
+        { value = "mature",         label = "Mature"         },
+        { value = "mecha",          label = "Mecha"          },
+        { value = "military",       label = "Military"       },
+        { value = "modern-life",    label = "Modern Life"    },
+        { value = "mystery",        label = "Mystery"        },
+        { value = "psychological",  label = "Psychological"  },
+        { value = "reincarnation",  label = "Reincarnation"  },
+        { value = "romance",        label = "Romance"        },
+        { value = "school-life",    label = "School Life"    },
+        { value = "sci-fi",         label = "Sci-fi"         },
+        { value = "seinen",         label = "Seinen"         },
+        { value = "shoujo",         label = "Shoujo"         },
+        { value = "shounen",        label = "Shounen"        },
+        { value = "slice-of-life",  label = "Slice of Life"  },
+        { value = "smut",           label = "Smut"           },
+        { value = "sports",         label = "Sports"         },
+        { value = "supernatural",   label = "Supernatural"   },
+        { value = "system",         label = "System"         },
+        { value = "thriller",       label = "Thriller"       },
+        { value = "tragedy",        label = "Tragedy"        },
+        { value = "urban-life",     label = "Urban Life"     },
+        { value = "war",            label = "War"            },
+        { value = "wuxia",          label = "Wuxia"          },
+        { value = "xianxia",        label = "Xianxia"        },
+        { value = "xuanhuan",       label = "Xuanhuan"       },
+        { value = "yaoi",           label = "Yaoi"           },
+        { value = "yuri",           label = "Yuri"           },
+      }
+    },
+  }
+end
+
+-- ── Каталог с фильтрами ───────────────────────────────────────────────────────
+
+function getCatalogFiltered(index, filters)
+  local page   = index + 1
+  local ftype  = filters["type"]   or "sort/top-view-novel"
+  local status = filters["status"] or ""
+  local genres = filters["genre_included"] or {}
+  local genre  = genres[1] or ""
+
+  local basePath = genre ~= "" and ("genre/" .. genre) or ftype
+
+  local url = baseUrl .. basePath
+  local sep = "?"
+  if status ~= "" and genre ~= "" then
+    url = url .. sep .. "status=" .. status
+    sep = "&"
+  end
+  if page > 1 then url = url .. sep .. "page=" .. page end
+
+  local r = http_get(url)
+  if not r.success then return { items = {}, hasNext = false } end
+
+  local items = parseCatalogItems(r.body, true)
+  return { items = items, hasNext = #items > 0 }
 end
