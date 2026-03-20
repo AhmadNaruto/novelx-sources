@@ -3,7 +3,7 @@ name: "Chinese"
 sources:
   - id: "novel543"
     name: "Novel543"
-    version: "1.0.0"
+    version: "1.0.1"
     url: "https://raw.githubusercontent.com/HnDK0/external-sources/main/zh/novel543.lua"
     icon: "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/novel543.png"
     language: "zh"
