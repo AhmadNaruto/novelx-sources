@@ -130,10 +130,10 @@ function getChapterText(html, url)
   local chapterFile = string.match(url, "/([^/]+)%.html$") or ""
 
   local function extractPage(pageHtml)
-    local cleaned = html_remove(pageHtml, "div.gadBlock", "div.adBlock", "script", "ins", ".ads", ".ad", "p:contains(溫馨提示)")
-    local el = html_select_first(cleaned, "div.content")
+    local el = html_select_first(pageHtml, "div.content")
     if not el then return "" end
-    return html_text("<div>" .. el.html .. "</div>")
+    local cleaned = html_remove(el.html, "div.gadBlock", "div.adBlock", "script", "ins")
+    return html_text("<div>" .. cleaned .. "</div>")
   end
 
   local parts = {}
