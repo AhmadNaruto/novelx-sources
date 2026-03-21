@@ -1,7 +1,7 @@
 ﻿-- ── Метаданные ────────────────────────────────────────────────────────────────
 id        = "NovelBin"
 name      = "Novel Bin"
-version   = "1.0.5"
+version   = "1.0.6"
 baseUrl   = "https://novelbin.com/"
 language  = "en"
 icon      = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/novelbin.png"
@@ -163,10 +163,10 @@ end
 -- ── Текст главы ───────────────────────────────────────────────────────────────
 
 function getChapterText(html)
-  local cleaned = html_remove(html, "script", "style", ".ads", "h3", ".chapter-warning", ".ad-insert", "[id^=pf-]")
-  local el = html_select_first(cleaned, "#chr-content")
+  local el = html_select_first(html, "#chr-content")
   if not el then return "" end
-  return applyStandardContentTransforms(html_text(el.html))
+  local cleaned = html_remove(el.html, "script", "style", ".ads", "h3", "h4", ".chapter-warning", ".ad-insert", "[id^=pf-]")
+  return applyStandardContentTransforms(html_text(cleaned))
 end
 
 -- ── Жанры книги ───────────────────────────────────────────────────────────────
