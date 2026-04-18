@@ -2,9 +2,30 @@
 id       = "novelbuddy"
 name     = "NovelBuddy"
 version  = "1.0.3"
-baseUrl  = "https://novelbuddy.com"
+baseUrl  = "https://novelbuddy.io"
 language = "en"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/novelbuddy.png"
+
+-- ── Определение рабочего домена ───────────────────────────────────────────────
+
+local _resolvedBase = nil
+
+local function getBaseUrl()
+  if _resolvedBase then return _resolvedBase end
+
+  local candidates = { "https://novelbuddy.io", "https://novelbuddy.com" }
+  for _, candidate in ipairs(candidates) do
+    local r = http_get(candidate .. "/search?sort=views")
+    if r.success then
+      _resolvedBase = candidate
+      return _resolvedBase
+    end
+  end
+
+  -- Если оба недоступны — возвращаем первичный, ошибка всплывёт выше
+  _resolvedBase = candidates[1]
+  return _resolvedBase
+end
 
 -- ── Хелперы ───────────────────────────────────────────────────────────────────
 
@@ -12,14 +33,14 @@ local function absUrl(href)
   if not href or href == "" then return "" end
   if string_starts_with(href, "http") then return href end
   if string_starts_with(href, "//") then return "https:" .. href end
-  return url_resolve(baseUrl, href)
+  return url_resolve(getBaseUrl(), href)
 end
 
 local function applyStandardContentTransforms(text)
   if not text or text == "" then return "" end
   text = string_normalize(text)
-  local domain = baseUrl:gsub("https?://", ""):gsub("^www%.", ""):gsub("/$", "")
-  text = regex_replace(text, "(?i)" .. domain .. ".*?\\n", "")
+  -- Убираем оба домена
+  text = regex_replace(text, "(?i)novelbuddy\\.(io|com).*?\\n", "")
   text = regex_replace(text, "(?i)\\A[\\s\\p{Z}\\uFEFF]*((Глава\\s+\\d+|Chapter\\s+\\d+)[^\\n\\r]*[\\n\\r\\s]*)+", "")
   text = regex_replace(text, "(?im)^\\s*(Translator|Editor|Proofreader|Read\\s+(at|on|latest))[:\\s][^\\n\\r]{0,70}(\\r?\\n|$)", "")
   text = string_trim(text)
@@ -47,7 +68,7 @@ end
 -- ── Каталог ───────────────────────────────────────────────────────────────────
 
 function getCatalogList(index)
-  local url = baseUrl .. "/search?sort=views"
+  local url = getBaseUrl() .. "/search?sort=views"
   if index > 0 then url = url .. "&page=" .. tostring(index + 1) end
 
   local r = http_get(url)
@@ -60,7 +81,7 @@ end
 -- ── Поиск ─────────────────────────────────────────────────────────────────────
 
 function getCatalogSearch(index, query)
-  local url = baseUrl .. "/search?q=" .. url_encode(query)
+  local url = getBaseUrl() .. "/search?q=" .. url_encode(query)
   if index > 0 then url = url .. "&page=" .. tostring(index + 1) end
 
   local r = http_get(url)
@@ -117,7 +138,7 @@ function getChapterList(bookUrl)
     return {}
   end
 
-  local ajaxUrl = baseUrl .. "/api/manga/" .. bookId .. "/chapters?source=detail"
+  local ajaxUrl = getBaseUrl() .. "/api/manga/" .. bookId .. "/chapters?source=detail"
   local ar = http_get(ajaxUrl)
   if not ar.success then
     log_error("NovelBuddy: AJAX failed " .. tostring(ar.code))
@@ -162,6 +183,7 @@ function getChapterText(html, url)
   if not el then return "" end
   return applyStandardContentTransforms(html_text(el.html))
 end
+
 -- ── Жанры на странице книги ───────────────────────────────────────────────────
 
 function getBookGenres(bookUrl)
@@ -277,7 +299,7 @@ function getCatalogFiltered(index, filters)
   local status  = filters["status"]  or "all"
   local genres  = filters["genre_included"] or {}
 
-  local url = baseUrl .. "/search?sort=" .. url_encode(sort)
+  local url = getBaseUrl() .. "/search?sort=" .. url_encode(sort)
               .. "&status=" .. url_encode(status)
 
   for _, v in ipairs(genres) do
