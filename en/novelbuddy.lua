@@ -1,8 +1,8 @@
 ﻿-- ── Метаданные ────────────────────────────────────────────────────────────────
 id       = "novelbuddy"
 name     = "NovelBuddy"
-version  = "1.0.2"
-baseUrl  = "https://novelbuddy.io"
+version  = "1.0.3"
+baseUrl  = "https://novelbuddy.com"
 language = "en"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/novelbuddy.png"
 
