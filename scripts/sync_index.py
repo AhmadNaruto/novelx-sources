@@ -7,14 +7,25 @@ sync_index.py — генерация index.yaml из .lua плагинов.
 
 Языковые папки определяются автоматически — любая папка в корне репо
 у которой есть .lua файлы. Никакого хардкода языков.
+
+CDN: jsDelivr (cdn.jsdelivr.net) вместо raw.githubusercontent.com.
+  - Мгновенная инвалидация через purge-эндпоинт после пуша.
+  - Нет задержек кэша в 30+ минут как у raw.githubusercontent.com.
+  - При пин-коммите (?commit=sha) — гарантированно свежий файл.
 """
 
-import os, re, sys, subprocess
+import os, re, sys, subprocess, urllib.request
 from pathlib import Path
 
 # ── Конфиг ────────────────────────────────────────────────────────────────────
 
-RAW_BASE  = "https://raw.githubusercontent.com/{repo}/main"
+# jsDelivr CDN — обновляется мгновенно после purge, нет 30-минутного кэша
+CDN_BASE   = "https://cdn.jsdelivr.net/gh/{repo}@main"
+# Purge-эндпоинт jsDelivr для принудительного сброса кэша
+PURGE_BASE = "https://purge.jsdelivr.net/gh/{repo}@main"
+# Оставляем для справки (больше не используется в index.yaml)
+RAW_BASE   = "https://raw.githubusercontent.com/{repo}/main"
+
 SKIP_DIRS = {".git", ".github", "scripts", "icons"}
 
 # ── Автодетект языковых папок ─────────────────────────────────────────────────
@@ -122,18 +133,36 @@ def build_root_index(langs: list[dict], raw_base: str) -> str:
 
 # ── Главная логика ────────────────────────────────────────────────────────────
 
+def purge_jsdelivr(paths: list[str], purge_base: str):
+    """
+    Сбрасывает кэш jsDelivr для переданных путей.
+    Игнорирует ошибки сети — purge не критичен для работы.
+    """
+    for path in paths:
+        url = f"{purge_base}/{path.lstrip('/')}"
+        try:
+            with urllib.request.urlopen(url, timeout=10) as resp:
+                status = resp.status
+            print(f"  [purge] {path} → HTTP {status}")
+        except Exception as e:
+            print(f"  [purge] {path} → ошибка: {e} (не критично)")
+
+
 def sync(root: Path):
-    repo     = get_repo()
-    raw_base = RAW_BASE.format(repo=repo)
+    repo       = get_repo()
+    cdn_base   = CDN_BASE.format(repo=repo)
+    purge_base = PURGE_BASE.format(repo=repo)
     print(f"Репозиторий : {repo}")
-    print(f"Raw base    : {raw_base}\n")
+    print(f"CDN base    : {cdn_base}")
+    print(f"Purge base  : {purge_base}\n")
 
     lang_dirs = find_lang_dirs(root)
     if not lang_dirs:
         print("[WARN] Не найдено ни одной папки с .lua файлами.")
         return
 
-    langs_meta = []  # для корневого индекса
+    langs_meta  = []  # для корневого индекса
+    purge_paths = []  # пути для инвалидации кэша jsDelivr
 
     for lang_dir in lang_dirs:
         dir_path  = root / lang_dir
@@ -147,15 +176,16 @@ def sync(root: Path):
             meta = parse_lua(lua_file)
             if not meta:
                 continue
-            icon = meta["icon"] or f"{raw_base}/icons/{meta['id']}.png"
+            icon = meta["icon"] or f"{cdn_base}/icons/{meta['id']}.png"
             plugins.append({
                 "id":      meta["id"],
                 "name":    meta["name"],
                 "version": meta["version"],
-                "url":     f"{raw_base}/{lang_dir}/{lua_file.name}",
+                "url":     f"{cdn_base}/{lang_dir}/{lua_file.name}",
                 "icon":    icon,
             })
             print(f"  {meta['id']} v{meta['version']}")
+            purge_paths.append(f"{lang_dir}/{lua_file.name}")
 
         index_path = dir_path / "index.yaml"
         new_text   = build_lang_index(plugins, lang_code, lang_name)
@@ -167,12 +197,13 @@ def sync(root: Path):
         else:
             print(f"  → без изменений")
 
+        purge_paths.append(f"{lang_dir}/index.yaml")
         langs_meta.append({"dir": lang_dir, "code": lang_code, "name": lang_name})
         print()
 
     # Корневой index.yaml
     root_index = root / "index.yaml"
-    new_root   = build_root_index(langs_meta, raw_base)
+    new_root   = build_root_index(langs_meta, cdn_base)
     old_root   = root_index.read_text(encoding="utf-8") if root_index.exists() else ""
 
     print("── index.yaml (корневой) ──")
@@ -181,6 +212,12 @@ def sync(root: Path):
         print("  → обновлён")
     else:
         print("  → без изменений")
+
+    purge_paths.append("index.yaml")
+
+    # ── Инвалидация кэша jsDelivr ────────────────────────────────────────────
+    print("\n── Purge jsDelivr cache ──")
+    purge_jsdelivr(purge_paths, purge_base)
 
 if __name__ == "__main__":
     root = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(".")

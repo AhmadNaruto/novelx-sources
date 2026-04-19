@@ -37,3 +37,19 @@ jobs:
           git add "index.yaml" "*/index.yaml"
           git commit -m "chore: sync index.yaml [skip ci]"
           git push
+
+      # jsDelivr кэш сбрасывается автоматически скриптом sync_index.py,
+      # но на случай если надо сбросить вручную — можно раскомментировать:
+      # - name: Purge jsDelivr cache (manual fallback)
+      #   run: |
+      #     python - <<'EOF'
+      #     import urllib.request, os
+      #     repo = os.environ["GITHUB_REPOSITORY"]
+      #     base = f"https://purge.jsdelivr.net/gh/{repo}@main"
+      #     for path in ["index.yaml"]:
+      #         url = f"{base}/{path}"
+      #         with urllib.request.urlopen(url, timeout=15) as r:
+      #             print(f"{path} → {r.status}")
+      #     EOF
+      #   env:
+      #     GITHUB_REPOSITORY: ${{ github.repository }}
