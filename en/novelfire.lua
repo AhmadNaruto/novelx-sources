@@ -13,7 +13,7 @@ local function absUrl(href)
     if string_starts_with(href, "//") then return "https:" .. href end
     return url_resolve(baseUrl, href)
 end
-
+ 
 local function applyStandardContentTransforms(text)
     if not text or text == "" then return "" end
     text = string_normalize(text)
