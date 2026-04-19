@@ -38,33 +38,3 @@ jobs:
           git commit -m "chore: sync index.yaml [skip ci]"
           git push
 
-      - name: Purge jsDelivr cache
-        env:
-          GITHUB_REPOSITORY: ${{ github.repository }}
-        run: |
-          python - <<'EOF'
-          import urllib.request, os
-          repo = os.environ["GITHUB_REPOSITORY"]
-          base = f"https://purge.jsdelivr.net/gh/{repo}@main"
-
-          # Собираем все пути из языковых папок + корневой индекс
-          import pathlib, re
-          root = pathlib.Path(".")
-          skip = {".git", ".github", "scripts", "icons"}
-          paths = ["index.yaml"]
-          for d in sorted(root.iterdir()):
-              if not d.is_dir() or d.name in skip or d.name.startswith("."):
-                  continue
-              if any(d.glob("*.lua")):
-                  paths.append(f"{d.name}/index.yaml")
-                  for lua in sorted(d.glob("*.lua")):
-                      paths.append(f"{d.name}/{lua.name}")
-
-          for path in paths:
-              url = f"{base}/{path}"
-              try:
-                  with urllib.request.urlopen(url, timeout=15) as r:
-                      print(f"  [purge] {path} → HTTP {r.status}")
-              except Exception as e:
-                  print(f"  [purge] {path} → ошибка: {e}")
-          EOF
