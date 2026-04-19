@@ -129,7 +129,7 @@ function getChapterList(bookUrl)
     local allChapters = parsePage(r.body)
 
     if maxPage > 1 then
-        local CHUNK = 20
+        local CHUNK = 7
         for chunkStart = 2, maxPage, CHUNK do
             local chunkEnd = math.min(chunkStart + CHUNK - 1, maxPage)
             local urls = {}
@@ -151,7 +151,7 @@ function getChapterList(bookUrl)
                     table.insert(allChapters, ch)
                 end
             end
-            if chunkEnd < maxPage then sleep(1000) end
+            if chunkEnd < maxPage then sleep(350) end
         end
     end
     return allChapters
