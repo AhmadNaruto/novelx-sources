@@ -215,9 +215,10 @@ def sync(root: Path):
 
     purge_paths.append("index.yaml")
 
-    # ── Инвалидация кэша jsDelivr ────────────────────────────────────────────
-    print("\n── Purge jsDelivr cache ──")
-    purge_jsdelivr(purge_paths, purge_base)
+    # Список путей для purge — выводим чтобы workflow мог их использовать
+    print("\n── Пути для purge jsDelivr (выполняется после git push в CI) ──")
+    for p in purge_paths:
+        print(f"  {p}")
 
 if __name__ == "__main__":
     root = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(".")
