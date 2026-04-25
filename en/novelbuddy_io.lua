@@ -1,7 +1,7 @@
 ﻿-- -- Метаданные ----------------------------------------------------------------
 id       = "novelbuddy"
 name     = "NovelBuddy"
-version  = "2.2.7"
+version  = "2.2.8"
 baseUrl  = "https://novelbuddy.com"
 language = "en"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/novelbuddy.png"
@@ -77,69 +77,26 @@ local function extractNextData(body)
   return json_parse(jsonStr)
 end
 
--- Пытаемся получить manga id через HTML, иначе — через API поиска по slug
-local function resolveMangaId(bookUrl)
-  local slug = bookUrl:match("/([^/]+)$") or ""
-
-  local r = http_get(bookUrl)
-  if r.success then
-    local data = extractNextData(r.body)
-    if data then
-      local pp = data.props and data.props.pageProps
-      local manga = pp and pp.initialManga
-      if manga and manga.id then
-        return manga.id, manga.slug or slug
-      end
-    end
-  end
-
-  if slug ~= "" then
-    local searchUrl = "https://api.novelbuddy.com/titles/search?q=" .. url_encode(slug) .. "&limit=1"
-    local sr = http_get(searchUrl)
-    if sr.success then
-      local sdata = json_parse(sr.body)
-      if sdata then
-        local items = (sdata.data and sdata.data.items) or sdata.items or {}
-        if #items > 0 and items[1].id then
-          return items[1].id, items[1].slug or slug
-        end
-      end
-    end
-  end
-
-  return nil, slug
+-- Извлекает slug из URL книги
+local function slugFromUrl(bookUrl)
+  return bookUrl:match("/([^/]+)$") or ""
 end
 
--- Загружает данные книги
-local function fetchBookData(bookUrl)
-  local r = http_get(bookUrl)
-  if r.success then
-    local data = extractNextData(r.body)
-    if data then
-      local pp = data.props and data.props.pageProps
-      if pp and pp.initialManga then
-        return pp.initialManga
-      end
-    end
-  end
-
-  local slug = bookUrl:match("/([^/]+)$") or ""
+-- Ищет книгу через API поиска по slug
+local function searchBySlug(slug)
   if slug == "" then return nil end
-
   local searchUrl = "https://api.novelbuddy.com/titles/search?q=" .. url_encode(slug) .. "&limit=1"
   local sr = http_get(searchUrl)
   if not sr.success then return nil end
-
   local sdata = json_parse(sr.body)
   if not sdata then return nil end
-
   local items = (sdata.data and sdata.data.items) or sdata.items or {}
-  if #items == 0 then return nil end
+  if #items == 0 or not items[1].id then return nil end
+  return items[1]
+end
 
-  local manga = items[1]
-  local mangaId = manga.id
-  if not mangaId then return nil end
-
+-- Загружает полные данные книги по id через API
+local function fetchDetailById(mangaId, fallback)
   local detailUrl = "https://api.novelbuddy.com/titles/" .. url_encode(mangaId)
   local dr = http_get(detailUrl)
   if dr.success then
@@ -147,29 +104,49 @@ local function fetchBookData(bookUrl)
     if ddata and ddata.data then
       local full = ddata.data
       full.id      = full.id      or mangaId
-      full.slug    = full.slug    or manga.slug or slug
-      full.name    = full.name    or manga.name
-      full.cover   = full.cover   or manga.cover
+      full.slug    = full.slug    or (fallback and fallback.slug) or ""
+      full.name    = full.name    or (fallback and fallback.name)
+      full.cover   = full.cover   or (fallback and fallback.cover)
       full.summary = full.summary or full.description or ""
       full.genres  = full.genres  or {}
-      full.stats   = full.stats   or manga.stats or {}
-      full.updatedAt  = full.updated_at or manga.updated_at
-      full.updated_at = full.updated_at or manga.updated_at
+      full.stats   = full.stats   or (fallback and fallback.stats) or {}
+      full.updated_at = full.updated_at or (fallback and fallback.updated_at)
+      full.updatedAt  = full.updatedAt  or full.updated_at
       return full
     end
   end
+  if fallback then
+    return {
+      id         = mangaId,
+      slug       = fallback.slug or "",
+      name       = fallback.name,
+      cover      = fallback.cover,
+      summary    = fallback.description or "",
+      genres     = {},
+      stats      = fallback.stats or {},
+      updated_at = fallback.updated_at,
+      updatedAt  = fallback.updated_at,
+    }
+  end
+  return nil
+end
 
-  return {
-    id         = mangaId,
-    slug       = manga.slug or slug,
-    name       = manga.name,
-    cover      = manga.cover,
-    summary    = manga.description or "",
-    genres     = {},
-    stats      = manga.stats or {},
-    updatedAt  = manga.updated_at,
-    updated_at = manga.updated_at,
-  }
+-- Возвращает mangaId и mangaSlug — только через API, без запросов к novelbuddy.com
+local function resolveMangaId(bookUrl)
+  local slug = slugFromUrl(bookUrl)
+  local item = searchBySlug(slug)
+  if item then
+    return item.id, item.slug or slug
+  end
+  return nil, slug
+end
+
+-- Загружает данные книги — только через API, без запросов к novelbuddy.com
+local function fetchBookData(bookUrl)
+  local slug = slugFromUrl(bookUrl)
+  local item = searchBySlug(slug)
+  if not item then return nil end
+  return fetchDetailById(item.id, item)
 end
 
 -- -- Каталог -------------------------------------------------------------------
@@ -322,26 +299,22 @@ function getChapterList(bookUrl)
     log_error("NovelBuddy: chapters API request failed for id=" .. tostring(mangaId))
   end
 
-  -- Фолбэк: читаем главы из __NEXT_DATA__ страницы книги
+  -- Фолбэк: запрашиваем детали книги через API и берём главы оттуда
   if #chapters == 0 then
-    local r = http_get(bookUrl)
-    if r.success then
-      local data = extractNextData(r.body)
-      if data then
-        local pp = data.props and data.props.pageProps
-        local manga = pp and pp.initialManga
-        local rawChapters = manga and manga.chapters
-        if rawChapters and #rawChapters > 0 then
-          for _, ch in ipairs(rawChapters) do
-            local slug  = ch.slug or ch.id or ""
-            local chUrl = ch.url and absUrl(ch.url)
-                          or (slug ~= "" and absUrl("/" .. (mangaSlug or "") .. "/" .. slug))
-                          or ""
-            local title = ch.name or ch.title or slug
-            if chUrl ~= "" then
-              table.insert(chapters, { title = string_clean(title), url = absUrl(chUrl) })
-            end
-          end
+    log_error("NovelBuddy: chapters API empty, trying detail endpoint for id=" .. tostring(mangaId))
+    local detailUrl = "https://api.novelbuddy.com/titles/" .. url_encode(mangaId)
+    local dr = http_get(detailUrl)
+    if dr.success then
+      local ddata = json_parse(dr.body)
+      local rawChapters = ddata and ddata.data and ddata.data.chapters or {}
+      for _, ch in ipairs(rawChapters) do
+        local slug  = ch.slug or ch.id or ""
+        local chUrl = ch.url and absUrl(ch.url)
+                      or (slug ~= "" and absUrl("/" .. (mangaSlug or "") .. "/" .. slug))
+                      or ""
+        local title = ch.name or ch.title or slug
+        if chUrl ~= "" then
+          table.insert(chapters, { title = string_clean(title), url = chUrl })
         end
       end
     end
