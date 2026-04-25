@@ -1,7 +1,7 @@
 ﻿-- ── Метаданные ────────────────────────────────────────────────────────────────
 id       = "novelbuddy_io"
 name     = "NovelBuddy (IO)"
-version  = "2.2.1"
+version  = "2.2.2"
 baseUrl  = "https://novelbuddy.io"
 language = "en"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/novelbuddy.png"
@@ -269,10 +269,11 @@ function getChapterList(bookUrl)
     return {}
   end
 
+  local chapters = {}
+
+  -- 1. Пробуем API /titles/{id}/chapters
   local apiUrl = "https://api.novelbuddy.io/titles/" .. url_encode(mangaId) .. "/chapters"
   local ar = http_get(apiUrl)
-
-  local chapters = {}
 
   if ar.success then
     local apiData = json_parse(ar.body)
@@ -284,6 +285,29 @@ function getChapterList(bookUrl)
         local title = ch.name or ch.title or slug
         if chUrl ~= "" then
           table.insert(chapters, { title = string_clean(title), url = absUrl(chUrl) })
+        end
+      end
+    end
+  end
+
+  -- 2. Fallback: если API не сработал — пробуем __NEXT_DATA__
+  if #chapters == 0 then
+    local r = http_get(bookUrl)
+    if r.success then
+      local data = extractNextData(r.body)
+      if data then
+        local pp = data.props and data.props.pageProps
+        local manga = pp and pp.initialManga
+        local rawChapters = manga and manga.chapters
+        if rawChapters and #rawChapters > 0 then
+          for _, ch in ipairs(rawChapters) do
+            local slug  = ch.slug or ch.id or ""
+            local chUrl = ch.url or absUrl("/" .. (mangaSlug or "") .. "/" .. slug)
+            local title = ch.name or ch.title or slug
+            if chUrl ~= "" then
+              table.insert(chapters, { title = string_clean(title), url = absUrl(chUrl) })
+            end
+          end
         end
       end
     end
@@ -309,6 +333,17 @@ end
 -- ── Текст главы ───────────────────────────────────────────────────────────────
 
 function getChapterText(html, url)
+  -- 1. Пробуем получить контент из __NEXT_DATA__ (Next.js v2.0)
+  local data = extractNextData(html)
+  if data then
+    local pp = data.props and data.props.pageProps
+    local chapter = pp and pp.initialChapter
+    if chapter and chapter.content and chapter.content ~= "" then
+      return applyStandardContentTransforms(chapter.content)
+    end
+  end
+
+  -- 2. Fallback: парсим HTML напрямую
   local cleaned = html_remove(html, "script", "style",
     "#listen-chapter", "#google_translate_element", ".ads", ".advertisement",
     "[class*='ad-']", "[id*='ad-']")
@@ -333,11 +368,10 @@ function getFilterList()
       label        = "Order by",
       defaultValue = "popular",
       options = {
-        { value = "popular",    label = "Popular"    },
-        { value = "updated_at", label = "Updated At" },
-        { value = "created_at", label = "Created At" },
-        { value = "name",       label = "Name"       },
-        { value = "rating",     label = "Rating"     },
+        { value = "popular", label = "Popular"     },
+        { value = "rating",  label = "Rating"      },
+        { value = "views",   label = "Most Viewed" },
+        { value = "chapters",label = "Chapters"    },
       }
     },
     {
