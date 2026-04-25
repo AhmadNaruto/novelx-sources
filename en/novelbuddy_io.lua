@@ -381,7 +381,7 @@ function getChapterText(html, url)
         -- Убираем JSON-мусор если content случайно пустой но есть вложенные данные
         if content == "" and apiData.data and apiData.data.chapter then
           content = apiData.data.chapter.content or apiData.data.chapter.text or ""
-        end""
+        end
         if content ~= "" then
           return applyStandardContentTransforms(content)
         end
