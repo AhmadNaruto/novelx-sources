@@ -1,7 +1,7 @@
 ﻿-- -- Метаданные ----------------------------------------------------------------
 id       = "novelbuddy"
 name     = "NovelBuddy"
-version  = "2.3.1"
+version  = "2.3.2"
 baseUrl  = "https://novelbuddy.com"
 language = "en"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/novelbuddy.png"
@@ -63,6 +63,25 @@ local function decodeHtmlEntities(text)
   text = text:gsub("&#(%d+);",  function(n) return string.char(tonumber(n)) end)
   text = text:gsub("&#x(%x+);", function(h) return string.char(tonumber(h, 16)) end)
   return text
+end
+
+-- Удаляет HTML-теги и возвращает чистый текст с абзацами
+local function stripHtml(content)
+  if not content or content == "" then return "" end
+  -- <p> открывающий -> перенос строки перед абзацем
+  content = regex_replace(content, "<p[^>]*>", "\n")
+  content = regex_replace(content, "</p>", "")
+  -- <br> -> перенос строки
+  content = regex_replace(content, "<br[^>]*>", "\n")
+  -- Убираем все оставшиеся теги (div, span и т.д.)
+  content = regex_replace(content, "<[^>]+>", "")
+  -- Декодируем HTML entities
+  content = decodeHtmlEntities(content)
+  -- Схлопываем 3+ переносов в двойной
+  content = regex_replace(content, "\n\n\n+", "\n\n")
+  -- Убираем пробелы в начале строк
+  content = regex_replace(content, "(?m)^[ \t]+", "")
+  return string_trim(content)
 end
 
 -- Извлекает JSON из тега <script id="__NEXT_DATA__"> (string-based)
@@ -131,7 +150,7 @@ local function fetchDetailById(mangaId, fallback)
   return nil
 end
 
--- Возвращает mangaId и mangaSlug — только через API, без запросов к novelbuddy.com
+-- Возвращает mangaId и mangaSlug — только через API
 local function resolveMangaId(bookUrl)
   local slug = slugFromUrl(bookUrl)
   local item = searchBySlug(slug)
@@ -141,7 +160,7 @@ local function resolveMangaId(bookUrl)
   return nil, slug
 end
 
--- Загружает данные книги — только через API, без запросов к novelbuddy.com
+-- Загружает данные книги — только через API
 local function fetchBookData(bookUrl)
   local slug = slugFromUrl(bookUrl)
   local item = searchBySlug(slug)
@@ -153,8 +172,6 @@ end
 
 function getCatalogList(index, filters)
   local page   = index + 1
-
-  -- Если переданы фильтры — применяем их (приложение может вызвать getCatalogList с фильтрами)
   local sort   = "popular"
   local status = "all"
   local genres = {}
@@ -171,9 +188,10 @@ function getCatalogList(index, filters)
     apiUrl = apiUrl .. "&status=" .. url_encode(status)
   end
 
+  -- ★ Жанры через запятую без url_encode (чтобы не кодировать запятую в %2C)
   local genreStr = table.concat(genres, ",")
   if genreStr ~= "" then
-    apiUrl = apiUrl .. "&genres=" .. url_encode(genreStr)
+    apiUrl = apiUrl .. "&genres=" .. genreStr
   end
 
   local r = http_get(apiUrl)
@@ -256,9 +274,7 @@ function getBookDescription(bookUrl)
   if not manga then return nil end
   local summary = manga.summary or manga.description or ""
   if summary ~= "" then
-    -- Убираем HTML-теги
     summary = regex_replace(summary, "<[^>]+>", "")
-    -- Декодируем HTML entities
     summary = decodeHtmlEntities(summary)
     return string_trim(summary)
   end
@@ -298,12 +314,9 @@ function getChapterList(bookUrl)
   if ar.success then
     local apiData = json_parse(ar.body)
     if apiData then
-      -- Проверяем флаг success (если явно false — пропускаем)
       if apiData.success ~= false then
         local rawChapters = (apiData.data and apiData.data.chapters) or apiData.chapters or {}
         for _, ch in ipairs(rawChapters) do
-          -- ch.id — числовой/строковый id главы, ch.slug — читаемый slug
-          -- API эндпоинт /chapters/{id} работает только с id, не slug
           local chId   = ch.id   or ""
           local chSlug = ch.slug or chId
           local chUrl  = ""
@@ -323,7 +336,7 @@ function getChapterList(bookUrl)
     log_error("NovelBuddy: chapters API request failed for id=" .. tostring(mangaId))
   end
 
-  -- Фолбэк: запрашиваем детали книги через API и берём главы оттуда
+  -- Фолбэк: берём главы из детального эндпоинта
   if #chapters == 0 then
     log_error("NovelBuddy: chapters API empty, trying detail endpoint for id=" .. tostring(mangaId))
     local detailUrl = "https://api.novelbuddy.com/titles/" .. url_encode(mangaId)
@@ -365,24 +378,21 @@ end
 -- -- Текст главы ---------------------------------------------------------------
 
 function getChapterText(html, url)
-  -- Если URL указывает на API — загружаем контент главы напрямую через API
+  -- Если URL указывает на API — загружаем контент главы напрямую
   if url and string_starts_with(url, "https://api.novelbuddy.com/") then
     local r = http_get(url)
     if r.success then
       local apiData = json_parse(r.body)
       if apiData then
-        -- Структура: {"success":true,"data":{"chapter":{"content":"..."}}}
-        local ch = (apiData.data and apiData.data.chapter)
-                   or (apiData.data and apiData.data.content and apiData.data)
-                   or apiData.chapter
-                   or {}
-        local content = ch.content or ch.text or
-                        (apiData.data and type(apiData.data) == "string" and apiData.data) or ""
-        -- Убираем JSON-мусор если content случайно пустой но есть вложенные данные
+        -- Структура: {"success":true,"data":{"content_type":"novel","chapter":{"content":"..."}}}
+        local ch = (apiData.data and apiData.data.chapter) or {}
+        local content = ch.content or ch.text or ""
         if content == "" and apiData.data and apiData.data.chapter then
           content = apiData.data.chapter.content or apiData.data.chapter.text or ""
         end
         if content ~= "" then
+          -- ★ Контент приходит в виде HTML — стрипаем теги
+          content = stripHtml(content)
           return applyStandardContentTransforms(content)
         end
       end
@@ -397,7 +407,8 @@ function getChapterText(html, url)
     local pp = data.props and data.props.pageProps
     local chapter = pp and pp.initialChapter
     if chapter and chapter.content and chapter.content ~= "" then
-      return applyStandardContentTransforms(chapter.content)
+      local content = stripHtml(chapter.content)
+      return applyStandardContentTransforms(content)
     end
   end
 
@@ -512,8 +523,6 @@ function getCatalogFiltered(index, filters)
   local status = filters["status"] or "all"
   local genres = filters["genre"]  or {}
 
-  local genreStr = table.concat(genres, ",")
-
   local apiUrl = "https://api.novelbuddy.com/titles/search?sort=" .. url_encode(sort)
                  .. "&page=" .. tostring(page)
                  .. "&limit=24"
@@ -522,8 +531,10 @@ function getCatalogFiltered(index, filters)
     apiUrl = apiUrl .. "&status=" .. url_encode(status)
   end
 
+  -- ★ Жанры через запятую без url_encode (чтобы не кодировать запятую в %2C)
+  local genreStr = table.concat(genres, ",")
   if genreStr ~= "" then
-    apiUrl = apiUrl .. "&genres=" .. url_encode(genreStr)
+    apiUrl = apiUrl .. "&genres=" .. genreStr
   end
 
   local r = http_get(apiUrl)
