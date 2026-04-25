@@ -1,7 +1,7 @@
 ﻿-- ── Метаданные ────────────────────────────────────────────────────────────────
 id       = "novelbuddy_io"
 name     = "NovelBuddy (IO)"
-version  = "2.1.0"
+version  = "2.2.0"
 baseUrl  = "https://novelbuddy.io"
 language = "en"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/novelbuddy.png"
@@ -33,45 +33,144 @@ local function extractNextData(body)
   return json_decode(el.text)
 end
 
+-- Пытаемся получить manga id через HTML, иначе — через API поиска по slug
+local function resolveMangaId(bookUrl)
+  local slug = bookUrl:match("/([^/]+)$") or ""
+
+  -- 1. Пробуем HTML-страницу
+  local r = http_get(bookUrl)
+  if r.success then
+    local data = extractNextData(r.body)
+    if data then
+      local pp = data.props and data.props.pageProps
+      local manga = pp and pp.initialManga
+      if manga and manga.id then
+        return manga.id, manga.slug or slug
+      end
+    end
+  end
+
+  -- 2. Fallback: API поиска по slug
+  if slug ~= "" then
+    local searchUrl = "https://api.novelbuddy.io/titles/search?q=" .. url_encode(slug) .. "&limit=1"
+    local sr = http_get(searchUrl)
+    if sr.success then
+      local sdata = json_decode(sr.body)
+      if sdata then
+        local items = (sdata.data and sdata.data.items) or sdata.items or {}
+        if #items > 0 and items[1].id then
+          return items[1].id, items[1].slug or slug
+        end
+      end
+    end
+  end
+
+  return nil, slug
+end
+
+-- Загружает данные книги через API (или HTML fallback)
+local function fetchBookData(bookUrl)
+  -- 1. Пробуем HTML
+  local r = http_get(bookUrl)
+  if r.success then
+    local data = extractNextData(r.body)
+    if data then
+      local pp = data.props and data.props.pageProps
+      if pp and pp.initialManga then
+        return pp.initialManga
+      end
+    end
+  end
+
+  -- 2. Fallback через API по slug
+  local slug = bookUrl:match("/([^/]+)$") or ""
+  if slug == "" then return nil end
+
+  local searchUrl = "https://api.novelbuddy.io/titles/search?q=" .. url_encode(slug) .. "&limit=1"
+  local sr = http_get(searchUrl)
+  if not sr.success then return nil end
+
+  local sdata = json_decode(sr.body)
+  if not sdata then return nil end
+
+  local items = (sdata.data and sdata.data.items) or sdata.items or {}
+  if #items == 0 then return nil end
+
+  local manga = items[1]
+  local mangaId = manga.id
+  if not mangaId then return nil end
+
+  -- 3. Пробуем получить полные данные через /titles/{id}
+  local detailUrl = "https://api.novelbuddy.io/titles/" .. url_encode(mangaId)
+  local dr = http_get(detailUrl)
+  if dr.success then
+    local ddata = json_decode(dr.body)
+    if ddata and ddata.data then
+      local full = ddata.data
+      full.id = full.id or mangaId
+      full.slug = full.slug or manga.slug or slug
+      full.name = full.name or manga.name
+      full.cover = full.cover or manga.cover
+      full.summary = full.summary or full.description or ""
+      full.genres = full.genres or {}
+      full.stats = full.stats or manga.stats or {}
+      full.updatedAt = full.updated_at or manga.updated_at
+      full.updated_at = full.updated_at or manga.updated_at
+      return full
+    end
+  end
+
+  -- 4. Если /titles/{id} недоступен — используем данные из поиска
+  return {
+    id = mangaId,
+    slug = manga.slug or slug,
+    name = manga.name,
+    cover = manga.cover,
+    summary = manga.description or "",
+    genres = {},
+    stats = manga.stats or {},
+    updatedAt = manga.updated_at,
+    updated_at = manga.updated_at,
+  }
+end
+
 -- ── Каталог (популярные) ──────────────────────────────────────────────────────
 
 function getCatalogList(index)
-  local page = index + 1
-  local url  = baseUrl .. "/popular?page=" .. tostring(page)
+  local page   = index + 1
+  local apiUrl = "https://api.novelbuddy.io/titles/search?sort=popular&page=" .. tostring(page) .. "&limit=24"
 
-  local r = http_get(url)
+  local r = http_get(apiUrl)
   if not r.success then return { items = {}, hasNext = false } end
 
-  local data = extractNextData(r.body)
+  local data = json_decode(r.body)
   if not data then return { items = {}, hasNext = false } end
 
-  local pageProps = data.props and data.props.pageProps
-  if not pageProps then return { items = {}, hasNext = false } end
-
-  local rawItems = pageProps.items or {}
-  local items = {}
+  local inner    = data.data or {}
+  local rawItems = inner.items or {}
+  local items    = {}
   for _, novel in ipairs(rawItems) do
-    local bookUrl = absUrl(novel.url or ("/" .. (novel.slug or "")))
+    local slug    = novel.slug or ""
+    local bookUrl = absUrl("/" .. slug)
     local cover   = novel.cover or ""
-    local title   = novel.name  or ""
-    if bookUrl ~= "" and title ~= "" then
+    local title   = novel.name or ""
+    if slug ~= "" and title ~= "" then
       table.insert(items, {
         title = title,
         url   = bookUrl,
-        cover = cover
+        cover = cover,
       })
     end
   end
 
-  local pagination = pageProps.pagination or {}
+  local pagination = inner.pagination or {}
   local hasNext = pagination.has_next
-  if hasNext == nil then hasNext = #items > 0 end
+  if hasNext == nil then hasNext = #items >= 24 end
 
   return { items = items, hasNext = hasNext }
 end
 
 -- ── Поиск ─────────────────────────────────────────────────────────────────────
--- Сайт рендерит результаты поиска на клиенте, поэтому используем API напрямую.
 
 function getCatalogSearch(index, query)
   local page   = index + 1
@@ -84,10 +183,9 @@ function getCatalogSearch(index, query)
   local data = json_decode(r.body)
   if not data then return { items = {}, hasNext = false } end
 
-  -- API возвращает {"success":true,"data":{"items":[...]}}
   local inner    = data.data or {}
   local rawItems = inner.items or data.items or data.results or {}
-  local items = {}
+  local items    = {}
   for _, novel in ipairs(rawItems) do
     local slug    = novel.slug or ""
     local bookUrl = absUrl("/" .. slug)
@@ -98,7 +196,7 @@ function getCatalogSearch(index, query)
       table.insert(items, {
         title = title,
         url   = bookUrl,
-        cover = cover
+        cover = cover,
       })
     end
   end
@@ -108,18 +206,6 @@ function getCatalogSearch(index, query)
   if hasNext == nil then hasNext = #items >= 24 end
 
   return { items = items, hasNext = hasNext }
-end
-
--- ── Внутренний хелпер: загрузить и разобрать страницу книги ──────────────────
-
-local function fetchBookData(bookUrl)
-  local r = http_get(bookUrl)
-  if not r.success then return nil end
-  local data = extractNextData(r.body)
-  if not data then return nil end
-  local pp = data.props and data.props.pageProps
-  if not pp then return nil end
-  return pp.initialManga or nil
 end
 
 -- ── Детали книги ──────────────────────────────────────────────────────────────
@@ -146,14 +232,12 @@ end
 function getBookDescription(bookUrl)
   local manga = fetchBookData(bookUrl)
   if not manga then return nil end
-  local summary = manga.summary or ""
-  -- summary содержит HTML, конвертируем в текст
+  local summary = manga.summary or manga.description or ""
   if summary ~= "" then
-    -- Убираем теги
     summary = regex_replace(summary, "<[^>]+>", "")
-    summary = regex_replace(summary, "&lt;", "<")
-    summary = regex_replace(summary, "&gt;", ">")
-    summary = regex_replace(summary, "&amp;", "&")
+    summary = regex_replace(summary, "<", "<")
+    summary = regex_replace(summary, ">", ">")
+    summary = regex_replace(summary, "&", "&")
     summary = regex_replace(summary, "&nbsp;", " ")
     return string_trim(summary)
   end
@@ -164,10 +248,9 @@ function getBookGenres(bookUrl)
   local manga = fetchBookData(bookUrl)
   if not manga then return {} end
   local genres = {}
-  local seen = {}
-  -- genres
+  local seen   = {}
   for _, g in ipairs(manga.genres or {}) do
-    local name = g.name or ""
+    local name = type(g) == "string" and g or (g.name or "")
     if name ~= "" and not seen[name] then
       seen[name] = true
       table.insert(genres, name)
@@ -179,25 +262,14 @@ end
 -- ── Список глав ───────────────────────────────────────────────────────────────
 
 function getChapterList(bookUrl)
-  -- Сначала получаем id книги из __NEXT_DATA__
-  local r = http_get(bookUrl)
-  if not r.success then return {} end
+  local mangaId, mangaSlug = resolveMangaId(bookUrl)
 
-  local data = extractNextData(r.body)
-  if not data then return {} end
-
-  local pp    = data.props and data.props.pageProps
-  local manga = pp and pp.initialManga
-  if not manga then return {} end
-
-  local mangaId = manga.id or ""
-  if mangaId == "" then
+  if not mangaId then
     log_error("NovelBuddy IO: manga id not found for " .. bookUrl)
     return {}
   end
 
-  -- Загружаем полный список глав через API
-  local apiUrl = "https://api.novelbuddy.io/titles/" .. mangaId .. "/chapters?limit=9999&page=1"
+  local apiUrl = "https://api.novelbuddy.io/titles/" .. url_encode(mangaId) .. "/chapters"
   local ar = http_get(apiUrl)
 
   local chapters = {}
@@ -205,11 +277,11 @@ function getChapterList(bookUrl)
   if ar.success then
     local apiData = json_decode(ar.body)
     if apiData then
-      local rawChapters = apiData.data or apiData.chapters or apiData.items or {}
+      local rawChapters = (apiData.data and apiData.data.chapters) or apiData.chapters or {}
       for _, ch in ipairs(rawChapters) do
-        local slug   = ch.slug or ch.id or ""
-        local chUrl  = ch.url or absUrl("/" .. (manga.slug or "") .. "/" .. slug)
-        local title  = ch.name or ch.title or slug
+        local slug  = ch.slug or ch.id or ""
+        local chUrl = ch.url or absUrl("/" .. (mangaSlug or "") .. "/" .. slug)
+        local title = ch.name or ch.title or slug
         if chUrl ~= "" then
           table.insert(chapters, { title = string_clean(title), url = absUrl(chUrl) })
         end
@@ -217,24 +289,7 @@ function getChapterList(bookUrl)
     end
   end
 
-  -- Если API не дал результатов — берём главы из __NEXT_DATA__ (частичный список)
-  if #chapters == 0 then
-    local rawChapters = pp.chapters or {}
-    local mangaSlug   = manga.slug or ""
-    for _, ch in ipairs(rawChapters) do
-      local chUrl = ch.url or ("/" .. mangaSlug .. "/" .. (ch.id or ch.slug or ""))
-      local title = ch.name or ch.title or ""
-      if chUrl ~= "" then
-        table.insert(chapters, { title = string_clean(title), url = absUrl(chUrl) })
-      end
-    end
-    -- __NEXT_DATA__ отдаёт newest-first → разворачиваем
-    local reversed = {}
-    for i = #chapters, 1, -1 do table.insert(reversed, chapters[i]) end
-    return reversed
-  end
-
-  -- API обычно возвращает newest-first → разворачиваем
+  -- API возвращает newest-first → разворачиваем
   local reversed = {}
   for i = #chapters, 1, -1 do table.insert(reversed, chapters[i]) end
   return reversed
@@ -246,10 +301,9 @@ function getChapterListHash(bookUrl)
   local manga = fetchBookData(bookUrl)
   if not manga then return nil end
   local stats = manga.stats or {}
-  local count = stats.chaptersCount
+  local count = stats.chapters_count or stats.chaptersCount
   if count then return tostring(count) end
-  -- Запасной вариант: дата последнего обновления
-  return manga.updatedAt or nil
+  return manga.updated_at or manga.updatedAt or nil
 end
 
 -- ── Текст главы ───────────────────────────────────────────────────────────────
@@ -259,7 +313,6 @@ function getChapterText(html, url)
     "#listen-chapter", "#google_translate_element", ".ads", ".advertisement",
     "[class*='ad-']", "[id*='ad-']")
 
-  -- Новый сайт — пробуем новые селекторы сначала, потом старые
   local el = html_select_first(cleaned, ".chapter-content")
   if not el then el = html_select_first(cleaned, "#chapter-content") end
   if not el then el = html_select_first(cleaned, ".content-inner") end
@@ -365,12 +418,10 @@ function getCatalogFiltered(index, filters)
   local page   = index + 1
   local sort   = filters["sort"]   or "popular"
   local status = filters["status"] or "all"
-  local genres = filters["genre_included"] or {}
+  local genres = filters["genre"]  or {}
 
-  -- Строим жанры через запятую для API
   local genreStr = table.concat(genres, ",")
 
-  -- Используем API /titles/search с фильтрами
   local apiUrl = "https://api.novelbuddy.io/titles/search?sort=" .. url_encode(sort)
                  .. "&page=" .. tostring(page)
                  .. "&limit=24"
@@ -384,37 +435,7 @@ function getCatalogFiltered(index, filters)
   end
 
   local r = http_get(apiUrl)
-  if not r.success then
-    -- Запасной вариант: веб-страница /search
-    local fallbackUrl = baseUrl .. "/search?sort=" .. url_encode(sort)
-                        .. "&page=" .. tostring(page)
-    if status ~= "all" and status ~= "" then
-      fallbackUrl = fallbackUrl .. "&status=" .. url_encode(status)
-    end
-    if genreStr ~= "" then
-      fallbackUrl = fallbackUrl .. "&genres=" .. url_encode(genreStr)
-    end
-    r = http_get(fallbackUrl)
-    if not r.success then return { items = {}, hasNext = false } end
-
-    local data = extractNextData(r.body)
-    if not data then return { items = {}, hasNext = false } end
-    local pp       = data.props and data.props.pageProps
-    local rawItems = pp and (pp.items or pp.mangas) or {}
-    local items    = {}
-    for _, novel in ipairs(rawItems) do
-      local bookUrl = absUrl(novel.url or ("/" .. (novel.slug or "")))
-      if bookUrl ~= "" and (novel.name or "") ~= "" then
-        table.insert(items, {
-          title = novel.name,
-          url   = bookUrl,
-          cover = novel.cover or ""
-        })
-      end
-    end
-    local pagination = pp and pp.pagination or {}
-    return { items = items, hasNext = pagination.has_next or (#items > 0) }
-  end
+  if not r.success then return { items = {}, hasNext = false } end
 
   local data = json_decode(r.body)
   if not data then return { items = {}, hasNext = false } end
