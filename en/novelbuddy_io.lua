@@ -1,7 +1,7 @@
 ﻿-- ── Метаданные ────────────────────────────────────────────────────────────────
 id       = "novelbuddy_io"
 name     = "NovelBuddy (IO)"
-version  = "2.2.0"
+version  = "2.2.1"
 baseUrl  = "https://novelbuddy.io"
 language = "en"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/novelbuddy.png"
@@ -30,7 +30,7 @@ end
 local function extractNextData(body)
   local el = html_select_first(body, "script#__NEXT_DATA__")
   if not el then return nil end
-  return json_decode(el.text)
+  return json_parse(el.text)
 end
 
 -- Пытаемся получить manga id через HTML, иначе — через API поиска по slug
@@ -55,7 +55,7 @@ local function resolveMangaId(bookUrl)
     local searchUrl = "https://api.novelbuddy.io/titles/search?q=" .. url_encode(slug) .. "&limit=1"
     local sr = http_get(searchUrl)
     if sr.success then
-      local sdata = json_decode(sr.body)
+      local sdata = json_parse(sr.body)
       if sdata then
         local items = (sdata.data and sdata.data.items) or sdata.items or {}
         if #items > 0 and items[1].id then
@@ -90,7 +90,7 @@ local function fetchBookData(bookUrl)
   local sr = http_get(searchUrl)
   if not sr.success then return nil end
 
-  local sdata = json_decode(sr.body)
+  local sdata = json_parse(sr.body)
   if not sdata then return nil end
 
   local items = (sdata.data and sdata.data.items) or sdata.items or {}
@@ -104,7 +104,7 @@ local function fetchBookData(bookUrl)
   local detailUrl = "https://api.novelbuddy.io/titles/" .. url_encode(mangaId)
   local dr = http_get(detailUrl)
   if dr.success then
-    local ddata = json_decode(dr.body)
+    local ddata = json_parse(dr.body)
     if ddata and ddata.data then
       local full = ddata.data
       full.id = full.id or mangaId
@@ -143,7 +143,7 @@ function getCatalogList(index)
   local r = http_get(apiUrl)
   if not r.success then return { items = {}, hasNext = false } end
 
-  local data = json_decode(r.body)
+  local data = json_parse(r.body)
   if not data then return { items = {}, hasNext = false } end
 
   local inner    = data.data or {}
@@ -180,7 +180,7 @@ function getCatalogSearch(index, query)
   local r = http_get(apiUrl)
   if not r.success then return { items = {}, hasNext = false } end
 
-  local data = json_decode(r.body)
+  local data = json_parse(r.body)
   if not data then return { items = {}, hasNext = false } end
 
   local inner    = data.data or {}
@@ -275,7 +275,7 @@ function getChapterList(bookUrl)
   local chapters = {}
 
   if ar.success then
-    local apiData = json_decode(ar.body)
+    local apiData = json_parse(ar.body)
     if apiData then
       local rawChapters = (apiData.data and apiData.data.chapters) or apiData.chapters or {}
       for _, ch in ipairs(rawChapters) do
@@ -437,7 +437,7 @@ function getCatalogFiltered(index, filters)
   local r = http_get(apiUrl)
   if not r.success then return { items = {}, hasNext = false } end
 
-  local data = json_decode(r.body)
+  local data = json_parse(r.body)
   if not data then return { items = {}, hasNext = false } end
 
   local inner    = data.data or {}
