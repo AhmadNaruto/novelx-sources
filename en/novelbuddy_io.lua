@@ -1,7 +1,7 @@
 ﻿-- -- Метаданные ----------------------------------------------------------------
 id       = "novelbuddy"
 name     = "NovelBuddy"
-version  = "2.3.2"
+version  = "2.3.3"
 baseUrl  = "https://novelbuddy.com"
 language = "en"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/novelbuddy.png"
@@ -27,7 +27,6 @@ local function absUrl(href)
   return url_resolve(baseUrl, href)
 end
 
--- Нормализует поле cover: может прийти как строка или как таблица { url = "..." }
 local function resolveCover(raw, slug)
   local cover = ""
   if type(raw) == "table" then
@@ -52,7 +51,6 @@ local function applyStandardContentTransforms(text)
   return text
 end
 
--- Декодирует HTML entities в plain text
 local function decodeHtmlEntities(text)
   if not text or text == "" then return "" end
   text = text:gsub("&amp;",  "&")
@@ -65,26 +63,18 @@ local function decodeHtmlEntities(text)
   return text
 end
 
--- Удаляет HTML-теги и возвращает чистый текст с абзацами
 local function stripHtml(content)
   if not content or content == "" then return "" end
-  -- <p> открывающий -> перенос строки перед абзацем
   content = regex_replace(content, "<p[^>]*>", "\n")
   content = regex_replace(content, "</p>", "")
-  -- <br> -> перенос строки
   content = regex_replace(content, "<br[^>]*>", "\n")
-  -- Убираем все оставшиеся теги (div, span и т.д.)
   content = regex_replace(content, "<[^>]+>", "")
-  -- Декодируем HTML entities
   content = decodeHtmlEntities(content)
-  -- Схлопываем 3+ переносов в двойной
   content = regex_replace(content, "\n\n\n+", "\n\n")
-  -- Убираем пробелы в начале строк
   content = regex_replace(content, "(?m)^[ \t]+", "")
   return string_trim(content)
 end
 
--- Извлекает JSON из тега <script id="__NEXT_DATA__"> (string-based)
 local function extractNextData(body)
   if not body then return nil end
   local startPos = body:find('<script id="__NEXT_DATA__" type="application/json">', 1, true)
@@ -96,12 +86,10 @@ local function extractNextData(body)
   return json_parse(jsonStr)
 end
 
--- Извлекает slug из URL книги
 local function slugFromUrl(bookUrl)
   return bookUrl:match("/([^/]+)$") or ""
 end
 
--- Ищет книгу через API поиска по slug
 local function searchBySlug(slug)
   if slug == "" then return nil end
   local searchUrl = "https://api.novelbuddy.com/titles/search?q=" .. url_encode(slug) .. "&limit=1"
@@ -114,7 +102,6 @@ local function searchBySlug(slug)
   return items[1]
 end
 
--- Загружает полные данные книги по id через API
 local function fetchDetailById(mangaId, fallback)
   local detailUrl = "https://api.novelbuddy.com/titles/" .. url_encode(mangaId)
   local dr = http_get(detailUrl)
@@ -150,7 +137,6 @@ local function fetchDetailById(mangaId, fallback)
   return nil
 end
 
--- Возвращает mangaId и mangaSlug — только через API
 local function resolveMangaId(bookUrl)
   local slug = slugFromUrl(bookUrl)
   local item = searchBySlug(slug)
@@ -160,7 +146,6 @@ local function resolveMangaId(bookUrl)
   return nil, slug
 end
 
--- Загружает данные книги — только через API
 local function fetchBookData(bookUrl)
   local slug = slugFromUrl(bookUrl)
   local item = searchBySlug(slug)
@@ -188,7 +173,6 @@ function getCatalogList(index, filters)
     apiUrl = apiUrl .. "&status=" .. url_encode(status)
   end
 
-  -- ★ Жанры через запятую без url_encode (чтобы не кодировать запятую в %2C)
   local genreStr = table.concat(genres, ",")
   if genreStr ~= "" then
     apiUrl = apiUrl .. "&genres=" .. genreStr
@@ -336,7 +320,6 @@ function getChapterList(bookUrl)
     log_error("NovelBuddy: chapters API request failed for id=" .. tostring(mangaId))
   end
 
-  -- Фолбэк: берём главы из детального эндпоинта
   if #chapters == 0 then
     log_error("NovelBuddy: chapters API empty, trying detail endpoint for id=" .. tostring(mangaId))
     local detailUrl = "https://api.novelbuddy.com/titles/" .. url_encode(mangaId)
@@ -378,30 +361,19 @@ end
 -- -- Текст главы ---------------------------------------------------------------
 
 function getChapterText(html, url)
-  -- Если URL указывает на API — загружаем контент главы напрямую
-  if url and string_starts_with(url, "https://api.novelbuddy.com/") then
-    local r = http_get(url)
-    if r.success then
-      local apiData = json_parse(r.body)
-      if apiData then
-        -- Структура: {"success":true,"data":{"content_type":"novel","chapter":{"content":"..."}}}
-        local ch = (apiData.data and apiData.data.chapter) or {}
-        local content = ch.content or ch.text or ""
-        if content == "" and apiData.data and apiData.data.chapter then
-          content = apiData.data.chapter.content or apiData.data.chapter.text or ""
-        end
-        if content ~= "" then
-          -- ★ Контент приходит в виде HTML — стрипаем теги
-          content = stripHtml(content)
-          return applyStandardContentTransforms(content)
-        end
+  -- Приложение передаёт в html готовый JSON-ответ API — парсим напрямую
+  if html and html ~= "" then
+    local apiData = json_parse(html)
+    if apiData and apiData.success and apiData.data and apiData.data.chapter then
+      local content = apiData.data.chapter.content or apiData.data.chapter.text or ""
+      if content ~= "" then
+        content = stripHtml(content)
+        return applyStandardContentTransforms(content)
       end
     end
-    log_error("NovelBuddy: chapter API failed for " .. url)
-    return ""
   end
 
-  -- Стандартный путь: HTML уже загружен приложением
+  -- Фолбэк 1: __NEXT_DATA__ в HTML-странице
   local data = extractNextData(html)
   if data then
     local pp = data.props and data.props.pageProps
@@ -412,6 +384,7 @@ function getChapterText(html, url)
     end
   end
 
+  -- Фолбэк 2: CSS-селекторы
   local cleaned = html_remove(html, "script", "style",
     "#listen-chapter", "#google_translate_element", ".ads", ".advertisement",
     "[class*='ad-']", "[id*='ad-']")
@@ -531,7 +504,6 @@ function getCatalogFiltered(index, filters)
     apiUrl = apiUrl .. "&status=" .. url_encode(status)
   end
 
-  -- ★ Жанры через запятую без url_encode (чтобы не кодировать запятую в %2C)
   local genreStr = table.concat(genres, ",")
   if genreStr ~= "" then
     apiUrl = apiUrl .. "&genres=" .. genreStr
