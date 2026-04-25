@@ -1,7 +1,7 @@
--- -- Метаданные ----------------------------------------------------------------
+﻿-- -- Метаданные ----------------------------------------------------------------
 id       = "novelbuddy"
 name     = "NovelBuddy"
-version  = "2.2.6"
+version  = "2.2.7"
 baseUrl  = "https://novelbuddy.com"
 language = "en"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/novelbuddy.png"
@@ -27,6 +27,20 @@ local function absUrl(href)
   return url_resolve(baseUrl, href)
 end
 
+-- Нормализует поле cover: может прийти как строка или как таблица { url = "..." }
+local function resolveCover(raw, slug)
+  local cover = ""
+  if type(raw) == "table" then
+    cover = raw.url or raw.src or ""
+  elseif type(raw) == "string" then
+    cover = raw
+  end
+  if cover == "" and slug and slug ~= "" then
+    cover = "https://static.novelbuddy.com/thumb/" .. slug .. ".png"
+  end
+  return cover
+end
+
 local function applyStandardContentTransforms(text)
   if not text or text == "" then return "" end
   text = string_normalize(text)
@@ -35,6 +49,19 @@ local function applyStandardContentTransforms(text)
   text = regex_replace(text, "(?i)\\A[\\s\\p{Z}\\uFEFF]*((Глава\\s+\\d+|Chapter\\s+\\d+)[^\\n\\r]*[\\n\\r\\s]*)+", "")
   text = regex_replace(text, "(?im)^\\s*(Translator|Editor|Proofreader|Read\\s+(at|on|latest))[:\\s][^\\n\\r]{0,70}(\\r?\\n|$)", "")
   text = string_trim(text)
+  return text
+end
+
+-- Декодирует HTML entities в plain text
+local function decodeHtmlEntities(text)
+  if not text or text == "" then return "" end
+  text = text:gsub("&amp;",  "&")
+  text = text:gsub("&nbsp;", " ")
+  text = text:gsub("&lt;",   "<")
+  text = text:gsub("&gt;",   ">")
+  text = text:gsub("&quot;", '"')
+  text = text:gsub("&#(%d+);",  function(n) return string.char(tonumber(n)) end)
+  text = text:gsub("&#x(%x+);", function(h) return string.char(tonumber(h, 16)) end)
   return text
 end
 
@@ -119,28 +146,28 @@ local function fetchBookData(bookUrl)
     local ddata = json_parse(dr.body)
     if ddata and ddata.data then
       local full = ddata.data
-      full.id = full.id or mangaId
-      full.slug = full.slug or manga.slug or slug
-      full.name = full.name or manga.name
-      full.cover = full.cover or manga.cover
+      full.id      = full.id      or mangaId
+      full.slug    = full.slug    or manga.slug or slug
+      full.name    = full.name    or manga.name
+      full.cover   = full.cover   or manga.cover
       full.summary = full.summary or full.description or ""
-      full.genres = full.genres or {}
-      full.stats = full.stats or manga.stats or {}
-      full.updatedAt = full.updated_at or manga.updated_at
+      full.genres  = full.genres  or {}
+      full.stats   = full.stats   or manga.stats or {}
+      full.updatedAt  = full.updated_at or manga.updated_at
       full.updated_at = full.updated_at or manga.updated_at
       return full
     end
   end
 
   return {
-    id = mangaId,
-    slug = manga.slug or slug,
-    name = manga.name,
-    cover = manga.cover,
-    summary = manga.description or "",
-    genres = {},
-    stats = manga.stats or {},
-    updatedAt = manga.updated_at,
+    id         = mangaId,
+    slug       = manga.slug or slug,
+    name       = manga.name,
+    cover      = manga.cover,
+    summary    = manga.description or "",
+    genres     = {},
+    stats      = manga.stats or {},
+    updatedAt  = manga.updated_at,
     updated_at = manga.updated_at,
   }
 end
@@ -163,7 +190,7 @@ function getCatalogList(index)
   for _, novel in ipairs(rawItems) do
     local slug    = novel.slug or ""
     local bookUrl = absUrl("/" .. slug)
-    local cover   = novel.cover or ""
+    local cover   = resolveCover(novel.cover, slug)
     local title   = novel.name or ""
     if slug ~= "" and title ~= "" then
       table.insert(items, { title = title, url = bookUrl, cover = cover })
@@ -196,7 +223,7 @@ function getCatalogSearch(index, query)
   for _, novel in ipairs(rawItems) do
     local slug    = novel.slug or ""
     local bookUrl = absUrl("/" .. slug)
-    local cover   = novel.cover or ("https://static.novelbuddy.com/thumb/" .. slug .. ".png")
+    local cover   = resolveCover(novel.cover, slug)
     local title   = novel.name or novel.title or ""
     if slug ~= "" and title ~= "" then
       table.insert(items, { title = title, url = bookUrl, cover = cover })
@@ -221,12 +248,7 @@ end
 function getBookCoverImageUrl(bookUrl)
   local manga = fetchBookData(bookUrl)
   if manga then
-    local cover = manga.cover or ""
-    if cover ~= "" then return cover end
-    local slug = manga.slug or ""
-    if slug ~= "" then
-      return "https://static.novelbuddy.com/thumb/" .. slug .. ".png"
-    end
+    return resolveCover(manga.cover, manga.slug)
   end
   return nil
 end
@@ -236,8 +258,10 @@ function getBookDescription(bookUrl)
   if not manga then return nil end
   local summary = manga.summary or manga.description or ""
   if summary ~= "" then
+    -- Убираем HTML-теги
     summary = regex_replace(summary, "<[^>]+>", "")
-    summary = summary:gsub("&#(%d+);", function(n) return string.char(tonumber(n)) end)
+    -- Декодируем HTML entities
+    summary = decodeHtmlEntities(summary)
     return string_trim(summary)
   end
   return nil
@@ -264,7 +288,7 @@ function getChapterList(bookUrl)
   local mangaId, mangaSlug = resolveMangaId(bookUrl)
 
   if not mangaId then
-    log_error("NovelBuddy IO: manga id not found for " .. bookUrl)
+    log_error("NovelBuddy: manga id not found for " .. bookUrl)
     return {}
   end
 
@@ -276,18 +300,29 @@ function getChapterList(bookUrl)
   if ar.success then
     local apiData = json_parse(ar.body)
     if apiData then
-      local rawChapters = (apiData.data and apiData.data.chapters) or apiData.chapters or {}
-      for _, ch in ipairs(rawChapters) do
-        local slug  = ch.slug or ch.id or ""
-        local chUrl = ch.url or absUrl("/" .. (mangaSlug or "") .. "/" .. slug)
-        local title = ch.name or ch.title or slug
-        if chUrl ~= "" then
-          table.insert(chapters, { title = string_clean(title), url = absUrl(chUrl) })
+      -- Проверяем флаг success (если явно false — пропускаем)
+      if apiData.success ~= false then
+        local rawChapters = (apiData.data and apiData.data.chapters) or apiData.chapters or {}
+        for _, ch in ipairs(rawChapters) do
+          local slug  = ch.slug or ch.id or ""
+          -- absUrl применяем к ch.url — он может быть как относительным, так и абсолютным
+          local chUrl = ch.url and absUrl(ch.url)
+                        or (slug ~= "" and absUrl("/" .. (mangaSlug or "") .. "/" .. slug))
+                        or ""
+          local title = ch.name or ch.title or slug
+          if chUrl ~= "" then
+            table.insert(chapters, { title = string_clean(title), url = chUrl })
+          end
         end
+      else
+        log_error("NovelBuddy: chapters API returned success=false for id=" .. tostring(mangaId))
       end
     end
+  else
+    log_error("NovelBuddy: chapters API request failed for id=" .. tostring(mangaId))
   end
 
+  -- Фолбэк: читаем главы из __NEXT_DATA__ страницы книги
   if #chapters == 0 then
     local r = http_get(bookUrl)
     if r.success then
@@ -299,7 +334,9 @@ function getChapterList(bookUrl)
         if rawChapters and #rawChapters > 0 then
           for _, ch in ipairs(rawChapters) do
             local slug  = ch.slug or ch.id or ""
-            local chUrl = ch.url or absUrl("/" .. (mangaSlug or "") .. "/" .. slug)
+            local chUrl = ch.url and absUrl(ch.url)
+                          or (slug ~= "" and absUrl("/" .. (mangaSlug or "") .. "/" .. slug))
+                          or ""
             local title = ch.name or ch.title or slug
             if chUrl ~= "" then
               table.insert(chapters, { title = string_clean(title), url = absUrl(chUrl) })
@@ -362,11 +399,11 @@ function getFilterList()
       label        = "Order by",
       defaultValue = "popular",
       options = {
-        { value = "popular", label = "Popular"       },
-        { value = "latest",  label = "Latest Update" },
-        { value = "rating",  label = "Rating"        },
-        { value = "views",   label = "Most Viewed"   },
-        { value = "chapters",label = "Most Chapters" },
+        { value = "popular",  label = "Popular"       },
+        { value = "latest",   label = "Latest Update" },
+        { value = "rating",   label = "Rating"        },
+        { value = "views",    label = "Most Viewed"   },
+        { value = "chapters", label = "Most Chapters" },
       }
     },
     {
@@ -385,57 +422,57 @@ function getFilterList()
       key   = "genre",
       label = "Genres (OR)",
       options = {
-        { value = "action",          label = "Action"          },
-        { value = "action-adventure",label = "Action Adventure"},
-        { value = "adult",           label = "Adult"           },
-        { value = "adventure",       label = "Adventure"       },
-        { value = "comedy",          label = "Comedy"          },
-        { value = "cultivation",     label = "Cultivation"     },
-        { value = "drama",           label = "Drama"           },
-        { value = "eastern",         label = "Eastern"         },
-        { value = "ecchi",           label = "Ecchi"           },
-        { value = "fan-fiction",     label = "Fan Fiction"     },
-        { value = "fantasy",         label = "Fantasy"         },
-        { value = "game",            label = "Game"            },
-        { value = "gender-bender",   label = "Gender Bender"   },
-        { value = "harem",           label = "Harem"           },
-        { value = "historical",      label = "Historical"      },
-        { value = "horror",          label = "Horror"          },
-        { value = "isekai",          label = "Isekai"          },
-        { value = "josei",           label = "Josei"           },
-        { value = "light-novel",     label = "Light Novel"     },
-        { value = "litrpg",          label = "LitRPG"          },
-        { value = "lolicon",         label = "Lolicon"         },
-        { value = "magic",           label = "Magic"           },
-        { value = "martial-arts",    label = "Martial Arts"    },
-        { value = "mature",          label = "Mature"          },
-        { value = "mecha",           label = "Mecha"           },
-        { value = "military",        label = "Military"        },
-        { value = "modern-life",     label = "Modern Life"     },
-        { value = "mystery",         label = "Mystery"         },
-        { value = "psychological",   label = "Psychological"   },
-        { value = "reincarnation",   label = "Reincarnation"   },
-        { value = "romance",         label = "Romance"         },
-        { value = "school-life",     label = "School Life"     },
-        { value = "sci-fi",          label = "Sci-fi"          },
-        { value = "seinen",          label = "Seinen"          },
-        { value = "shoujo",          label = "Shoujo"          },
-        { value = "shoujo-ai",       label = "Shoujo Ai"       },
-        { value = "shounen",         label = "Shounen"         },
-        { value = "shounen-ai",      label = "Shounen Ai"      },
-        { value = "slice-of-life",   label = "Slice of Life"   },
-        { value = "smut",            label = "Smut"            },
-        { value = "sports",          label = "Sports"          },
-        { value = "supernatural",    label = "Supernatural"    },
-        { value = "system",          label = "System"          },
-        { value = "tragedy",         label = "Tragedy"         },
-        { value = "urban",           label = "Urban"           },
-        { value = "urban-life",      label = "Urban Life"      },
-        { value = "wuxia",           label = "Wuxia"           },
-        { value = "xianxia",         label = "Xianxia"         },
-        { value = "xuanhuan",        label = "Xuanhuan"        },
-        { value = "yaoi",            label = "Yaoi"            },
-        { value = "yuri",            label = "Yuri"            },
+        { value = "action",           label = "Action"           },
+        { value = "action-adventure", label = "Action Adventure" },
+        { value = "adult",            label = "Adult"            },
+        { value = "adventure",        label = "Adventure"        },
+        { value = "comedy",           label = "Comedy"           },
+        { value = "cultivation",      label = "Cultivation"      },
+        { value = "drama",            label = "Drama"            },
+        { value = "eastern",          label = "Eastern"          },
+        { value = "ecchi",            label = "Ecchi"            },
+        { value = "fan-fiction",      label = "Fan Fiction"      },
+        { value = "fantasy",          label = "Fantasy"          },
+        { value = "game",             label = "Game"             },
+        { value = "gender-bender",    label = "Gender Bender"    },
+        { value = "harem",            label = "Harem"            },
+        { value = "historical",       label = "Historical"       },
+        { value = "horror",           label = "Horror"           },
+        { value = "isekai",           label = "Isekai"           },
+        { value = "josei",            label = "Josei"            },
+        { value = "light-novel",      label = "Light Novel"      },
+        { value = "litrpg",           label = "LitRPG"           },
+        { value = "lolicon",          label = "Lolicon"          },
+        { value = "magic",            label = "Magic"            },
+        { value = "martial-arts",     label = "Martial Arts"     },
+        { value = "mature",           label = "Mature"           },
+        { value = "mecha",            label = "Mecha"            },
+        { value = "military",         label = "Military"         },
+        { value = "modern-life",      label = "Modern Life"      },
+        { value = "mystery",          label = "Mystery"          },
+        { value = "psychological",    label = "Psychological"    },
+        { value = "reincarnation",    label = "Reincarnation"    },
+        { value = "romance",          label = "Romance"          },
+        { value = "school-life",      label = "School Life"      },
+        { value = "sci-fi",           label = "Sci-fi"           },
+        { value = "seinen",           label = "Seinen"           },
+        { value = "shoujo",           label = "Shoujo"           },
+        { value = "shoujo-ai",        label = "Shoujo Ai"        },
+        { value = "shounen",          label = "Shounen"          },
+        { value = "shounen-ai",       label = "Shounen Ai"       },
+        { value = "slice-of-life",    label = "Slice of Life"    },
+        { value = "smut",             label = "Smut"             },
+        { value = "sports",           label = "Sports"           },
+        { value = "supernatural",     label = "Supernatural"     },
+        { value = "system",           label = "System"           },
+        { value = "tragedy",          label = "Tragedy"          },
+        { value = "urban",            label = "Urban"            },
+        { value = "urban-life",       label = "Urban Life"       },
+        { value = "wuxia",            label = "Wuxia"            },
+        { value = "xianxia",          label = "Xianxia"          },
+        { value = "xuanhuan",         label = "Xuanhuan"         },
+        { value = "yaoi",             label = "Yaoi"             },
+        { value = "yuri",             label = "Yuri"             },
       }
     },
   }
@@ -475,7 +512,7 @@ function getCatalogFiltered(index, filters)
   for _, novel in ipairs(rawItems) do
     local slug    = novel.slug or ""
     local bookUrl = absUrl("/" .. slug)
-    local cover   = novel.cover or ("https://static.novelbuddy.com/thumb/" .. slug .. ".png")
+    local cover   = resolveCover(novel.cover, slug)
     local title   = novel.name or novel.title or ""
     if slug ~= "" and title ~= "" then
       table.insert(items, { title = title, url = bookUrl, cover = cover })
@@ -488,4 +525,3 @@ function getCatalogFiltered(index, filters)
 
   return { items = items, hasNext = hasNext }
 end
-
