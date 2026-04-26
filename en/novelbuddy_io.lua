@@ -1,7 +1,7 @@
 ﻿-- -- Метаданные ----------------------------------------------------------------
 id       = "novelbuddy"
 name     = "NovelBuddy"
-version  = "2.5.5"
+version  = "2.5.6"
 baseUrl  = "https://novelbuddy.com"
 language = "en"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/novelbuddy.png"
@@ -370,15 +370,11 @@ function getChapterList(bookUrl)
     local title = ch.name or ch.title or ch.slug or chId
 
     if chId ~= "" then
-      local chSlug   = ch.slug or chId
-      local apiUrl   = API_BASE .. "titles/" .. url_encode(mangaId)
+      local chApiUrl = API_BASE .. "titles/" .. url_encode(mangaId)
                        .. "/chapters/" .. url_encode(chId)
-      -- URL сайта для WebView, API URL в fragment для getChapterText
-      local siteUrl  = baseUrl .. "/" .. mangaSlug .. "/" .. chSlug
-                       .. "#api=" .. apiUrl
       table.insert(allChapters, {
         title = string_clean(title),
-        url   = siteUrl,
+        url   = chApiUrl,
       })
     end
   end
@@ -412,34 +408,47 @@ function getChapterText(html, url)
     return ""
   end
 
-  -- Извлекаем API URL из fragment (#api=...) или используем url напрямую если это уже API URL
-  local apiUrl = url:match("#api=(.+)$")
-  if not apiUrl or apiUrl == "" then
-    -- Фолбэк: если вдруг url это прямой API URL без fragment
-    apiUrl = url:match("^([^#]+)") or url
+  -- Приложение уже загрузило API URL и передало результат в html (Jsoup обернул JSON в HTML)
+  -- Пробуем вытащить JSON из html сначала, чтобы не делать лишний запрос
+  local apiData = nil
+
+  -- Jsoup оборачивает тело ответа в <html><head></head><body>...</body></html>
+  -- Извлекаем содержимое body
+  local bodyContent = html and (html:match("<body[^>]*>(.-)</body>") or html:match("<body>(.-)</body>"))
+  if bodyContent and bodyContent ~= "" then
+    -- Убираем HTML entities которые Jsoup мог добавить
+    bodyContent = bodyContent:gsub("&quot;", '"'):gsub("&amp;", "&"):gsub("&lt;", "<"):gsub("&gt;", ">")
+    local ok, parsed = pcall(json_parse, bodyContent)
+    if ok and type(parsed) == "table" and parsed.success and parsed.data and parsed.data.chapter then
+      apiData = parsed
+    end
   end
 
-  local r = http_get(apiUrl)
-  if not r or not r.success or not r.body or r.body == "" then
-    log_error("NovelBuddy: chapter API HTTP failed for " .. apiUrl)
-    return ""
-  end
-
-  local apiData = json_parse(r.body)
+  -- Если из html не вышло — грузим напрямую
   if not apiData then
-    log_error("NovelBuddy: JSON parse failed for " .. apiUrl)
-    return ""
+    local apiUrl = url:match("^([^#]+)") or url
+    local r = http_get(apiUrl)
+    if not r or not r.success or not r.body or r.body == "" then
+      log_error("NovelBuddy: chapter API HTTP failed for " .. apiUrl)
+      return ""
+    end
+    local ok, parsed = pcall(json_parse, r.body)
+    if not ok or not parsed then
+      log_error("NovelBuddy: JSON parse failed for " .. apiUrl)
+      return ""
+    end
+    apiData = parsed
   end
 
   local ch = apiData.data and apiData.data.chapter
   if not ch then
-    log_error("NovelBuddy: no chapter object in response for " .. apiUrl)
+    log_error("NovelBuddy: no chapter object in response for " .. url)
     return ""
   end
 
   local content = ch.content or ch.text or ""
   if content == "" then
-    log_error("NovelBuddy: empty content for " .. apiUrl)
+    log_error("NovelBuddy: empty content for " .. url)
     return ""
   end
 
