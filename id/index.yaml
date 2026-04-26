@@ -4,6 +4,6 @@ sources:
   - id: "baca_lightnovel"
     name: "Baca Lightnovel"
     version: "1.0.1"
-    url: "https://raw.githubusercontent.com/HnDK0/external-sources/refs/heads/main/id/bacalightnovel.lua"
+    url: "https://raw.githubusercontent.com/AhmadNaruto/novelx-sources/refs/heads/main/id/bacalightnovel.lua"
     icon: "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/bacalightnovel.png"
     language: "id"

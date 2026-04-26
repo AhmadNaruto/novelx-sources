@@ -1,16 +1,16 @@
 languages:
   en:
     name: "English"
-    url: "https://raw.githubusercontent.com/HnDK0/external-sources/refs/heads/main/en/index.yaml"
+    url: "https://raw.githubusercontent.com/AhmadNaruto/novelx-sources/refs/heads/main/en/index.yaml"
   id:
     name: "Indonesian"
-    url: "https://raw.githubusercontent.com/HnDK0/external-sources/refs/heads/main/id/index.yaml"
+    url: "https://raw.githubusercontent.com/AhmadNaruto/novelx-sources/refs/heads/main/id/index.yaml"
   mtl:
     name: "Mtl"
-    url: "https://raw.githubusercontent.com/HnDK0/external-sources/refs/heads/main/mtl/index.yaml"
+    url: "https://raw.githubusercontent.com/AhmadNaruto/novelx-sources/refs/heads/main/mtl/index.yaml"
   ru:
     name: "Russian"
-    url: "https://raw.githubusercontent.com/HnDK0/external-sources/refs/heads/main/ru/index.yaml"
+    url: "https://raw.githubusercontent.com/AhmadNaruto/novelx-sources/refs/heads/main/ru/index.yaml"
   zh:
     name: "Chinese"
-    url: "https://raw.githubusercontent.com/HnDK0/external-sources/refs/heads/main/zh/index.yaml"
+    url: "https://raw.githubusercontent.com/AhmadNaruto/novelx-sources/refs/heads/main/zh/index.yaml"
