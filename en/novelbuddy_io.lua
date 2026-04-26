@@ -1,7 +1,7 @@
 ﻿-- -- Метаданные ----------------------------------------------------------------
 id       = "novelbuddy"
 name     = "NovelBuddy"
-version  = "2.5.6"
+version  = "2.5.7"
 baseUrl  = "https://novelbuddy.com"
 language = "en"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/novelbuddy.png"
@@ -88,10 +88,6 @@ local function stripHtml(content)
 end
 
 -- Убирает дублирующиеся строки с названием главы в начале контента.
--- NovelBuddy вставляет название дважды:
---   1. Голым текстом перед первым <p>: "Chapter 2544 The Pain Is Too Much"
---   2. Внутри <p> без слова Chapter: "2544 The Pain Is Too Much"
--- Убираем все начальные строки которые являются подстрокой названия главы или наоборот.
 local function removeChapterTitleDuplicate(text, chapterName)
   if not text or text == "" or not chapterName or chapterName == "" then return text end
 
@@ -100,11 +96,9 @@ local function removeChapterTitleDuplicate(text, chapterName)
   local changed = true
   while changed do
     changed = false
-    -- Берём первую непустую строку
     local before, firstLine, after = text:match("^(%s*)([^\n]+)(\n?.*)$")
     if not firstLine then break end
     local lineClean = firstLine:match("^%s*(.-)%s*$"):lower()
-    -- Убираем если строка совпадает с названием, или название содержит строку, или строка содержит название
     if lineClean == nameClean
       or nameClean:find(lineClean, 1, true)
       or lineClean:find(nameClean, 1, true) then
@@ -117,7 +111,6 @@ local function removeChapterTitleDuplicate(text, chapterName)
 end
 
 local function slugFromUrl(bookUrl)
-  -- Берём последний сегмент пути, без query и fragment
   local path = bookUrl:match("^[^?#]+") or bookUrl
   return path:match("/([^/]+)$") or ""
 end
@@ -127,6 +120,43 @@ local function resolveGenreStr(genres)
   if type(genres) == "string" then return genres end
   if type(genres) == "table" then return table.concat(genres, ",") end
   return ""
+end
+
+-- Раскодирует JSON escape-последовательности вручную.
+-- Нужно когда json_parse не делает unescape или контент двойно экранирован.
+-- Проверяем наличие \\" или literal \n перед обработкой чтобы не трогать
+-- уже чистый контент.
+-- Порядок замен важен: сначала прячем \\ чтобы не сломать остальные замены,
+-- потом чистим \", \n, \r, \t, потом возвращаем \\.
+local function rawUnescape(s)
+  if not s or s == "" then return s end
+
+  -- Проверяем нужен ли unescape — ищем любой из признаков двойного escape
+  local needsUnescape = s:find('\\"', 1, true)
+                     or s:find("\\n", 1, true)
+                     or s:find("\\r", 1, true)
+                     or s:find("\\t", 1, true)
+
+  if not needsUnescape then
+    return s
+  end
+
+  log_info("NovelBuddy: rawUnescape triggered, content has escape sequences")
+
+  -- Прячем \\ → временный маркер, чтобы не испортить последующие замены
+  local MARKER = "\x01\x02\x03"
+  s = s:gsub("\\\\", MARKER)
+
+  -- Раскодируем escape-последовательности
+  s = s:gsub('\\"',  '"')
+  s = s:gsub("\\n",  "\n")
+  s = s:gsub("\\r",  "")     -- \r просто выбрасываем
+  s = s:gsub("\\t",  "\t")
+
+  -- Восстанавливаем одиночный backslash
+  s = s:gsub(MARKER, "\\")
+
+  return s
 end
 
 -- -- API запросы ---------------------------------------------------------------
@@ -171,7 +201,6 @@ local function fetchDetailById(mangaId, fallback)
     full.updated_at = full.updated_at or (fallback and fallback.updated_at)
     return full
   end
-  -- Фолбэк — используем данные из поискового результата
   if fallback then
     return {
       id         = mangaId,
@@ -219,7 +248,6 @@ function getCatalogList(index, filters)
   if type(filters) == "table" then
     sort    = filters["sort"]              or ""
     status  = filters["status"]            or ""
-    -- Kotlin передаёт checkbox как filters["genre_included"] (суффикс _included)
     genres  = resolveGenreStr(filters["genre_included"])
     exclude = resolveGenreStr(filters["exclude_included"])
     min_ch  = filters["min_ch"]            or ""
@@ -235,11 +263,9 @@ function getCatalogList(index, filters)
     params = params .. "&status=" .. url_encode(status)
   end
   if genres ~= "" then
-    -- API принимает: &genres=action,fantasy
     params = params .. "&genres=" .. genres
   end
   if exclude ~= "" then
-    -- API принимает: &exclude_genres=romance,comedy
     params = params .. "&exclude_genres=" .. exclude
   end
   if min_ch ~= "" then
@@ -344,8 +370,6 @@ function getBookGenres(bookUrl)
 end
 
 -- -- Список глав ---------------------------------------------------------------
--- Грузим все главы постранично через API (items, не chapters)
--- URL главы = прямой API endpoint для getChapterText
 
 function getChapterList(bookUrl)
   local mangaId, mangaSlug = resolveMangaId(bookUrl)
@@ -361,7 +385,6 @@ function getChapterList(bookUrl)
   end
 
   local inner       = data.data or {}
-  -- API возвращает главы в data.items (НЕ data.chapters)
   local rawChapters = inner.items or inner.chapters or {}
   local allChapters = {}
 
@@ -379,7 +402,6 @@ function getChapterList(bookUrl)
     end
   end
 
-  -- API возвращает главы от новых к старым — переворачиваем чтобы старые были первыми
   local reversed = {}
   for i = #allChapters, 1, -1 do
     table.insert(reversed, allChapters[i])
@@ -399,42 +421,67 @@ function getChapterListHash(bookUrl)
 end
 
 -- -- Текст главы ---------------------------------------------------------------
--- html = doc.outerHtml() — игнорируем, приложение грузит API URL напрямую
--- url  = прямой API URL: https://api.novelbuddy.com/titles/{id}/chapters/{id}
 
 function getChapterText(html, url)
+  log_info("NovelBuddy: getChapterText called, url=" .. tostring(url))
+  log_info("NovelBuddy: html length=" .. tostring(html and #html or 0))
+
   if not url or url == "" then
     log_error("NovelBuddy: getChapterText called with empty url")
     return ""
   end
 
-  -- Приложение уже загрузило API URL и передало результат в html (Jsoup обернул JSON в HTML)
-  -- Пробуем вытащить JSON из html сначала, чтобы не делать лишний запрос
-  local apiData = nil
+  local apiUrl = url:match("^([^#]+)") or url
+  log_info("NovelBuddy: apiUrl=" .. apiUrl)
 
-  -- Jsoup оборачивает тело ответа в <html><head></head><body>...</body></html>
-  -- Извлекаем содержимое body
-  local bodyContent = html and (html:match("<body[^>]*>(.-)</body>") or html:match("<body>(.-)</body>"))
-  if bodyContent and bodyContent ~= "" then
-    -- Убираем HTML entities которые Jsoup мог добавить
-    bodyContent = bodyContent:gsub("&quot;", '"'):gsub("&amp;", "&"):gsub("&lt;", "<"):gsub("&gt;", ">")
-    local ok, parsed = pcall(json_parse, bodyContent)
-    if ok and type(parsed) == "table" and parsed.success and parsed.data and parsed.data.chapter then
-      apiData = parsed
+  if not apiUrl:find("api%.novelbuddy", 1, true) then
+    log_error("NovelBuddy: URL is not API URL, got: " .. apiUrl)
+    local fromFragment = url:match("#api=(.+)$")
+    if fromFragment and fromFragment ~= "" then
+      apiUrl = fromFragment
+      log_info("NovelBuddy: using API URL from fragment: " .. apiUrl)
+    else
+      log_error("NovelBuddy: cannot determine API URL, bailing out")
+      return ""
     end
   end
 
-  -- Если из html не вышло — грузим напрямую
+  local apiData = nil
+
+  -- Путь 1: пробуем распарсить тело html если Jsoup уже загрузил API URL
+  -- ВАЖНО: в этом пути json_parse уже раскодирует \n и \" из JSON,
+  -- поэтому rawUnescape на выходе ничего не тронет (needsUnescape = false)
+  local bodyContent = html and (html:match("<body[^>]*>(.-)</body>") or html:match("<body>(.-)</body>"))
+  if bodyContent and bodyContent ~= "" then
+    bodyContent = bodyContent:gsub("&quot;", '"'):gsub("&amp;", "&"):gsub("&lt;", "<"):gsub("&gt;", ">")
+    local ok, parsed = pcall(json_parse, bodyContent)
+    if ok and type(parsed) == "table" and parsed.success and parsed.data and parsed.data.chapter then
+      log_info("NovelBuddy: got chapter from html body, skipping extra request")
+      apiData = parsed
+    else
+      log_info("NovelBuddy: html body is not valid API response, will fetch directly")
+    end
+  else
+    log_info("NovelBuddy: html body empty or not parseable")
+  end
+
+  -- Путь 2: грузим напрямую по API URL
+  -- В этом пути возможен двойной escape если API отдаёт content как
+  -- строку-внутри-строки (дважды сериализованный JSON).
+  -- rawUnescape обработает этот случай.
   if not apiData then
-    local apiUrl = url:match("^([^#]+)") or url
+    log_info("NovelBuddy: fetching " .. apiUrl)
     local r = http_get(apiUrl)
+    log_info("NovelBuddy: fetch result: success=" .. tostring(r and r.success)
+             .. " bodyLen=" .. tostring(r and r.body and #r.body or 0))
     if not r or not r.success or not r.body or r.body == "" then
       log_error("NovelBuddy: chapter API HTTP failed for " .. apiUrl)
       return ""
     end
     local ok, parsed = pcall(json_parse, r.body)
     if not ok or not parsed then
-      log_error("NovelBuddy: JSON parse failed for " .. apiUrl)
+      log_error("NovelBuddy: JSON parse failed for " .. apiUrl
+                .. " body[:200]=" .. r.body:sub(1, 200))
       return ""
     end
     apiData = parsed
@@ -452,10 +499,11 @@ function getChapterText(html, url)
     return ""
   end
 
-  -- json_parse в этом приложении не делает unescape — чистим вручную
-  content = content:gsub('\\"', '"')
-  content = content:gsub("\\n", "\n")
-  content = content:gsub("\\r", "")
+  -- Раскодируем JSON escape-последовательности.
+  -- Срабатывает только если в content остались литеральные \" или \n —
+  -- то есть json_parse не раскодировал их (двойной escape или иной случай).
+  -- Если json_parse уже всё раскодировал — функция вернёт content без изменений.
+  content = rawUnescape(content)
 
   content = stripHtml(content)
   content = removeChapterTitleDuplicate(content, ch.name or "")
