@@ -1,7 +1,7 @@
 ﻿-- -- Метаданные ----------------------------------------------------------------
 id       = "novelbuddy"
 name     = "NovelBuddy"
-version  = "2.6.4"
+version  = "2.6.5"
 baseUrl  = "https://novelbuddy.com"
 language = "en"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/novelbuddy.png"
@@ -440,6 +440,9 @@ function getChapterText(html, url)
   end
 
   local text = html_text(content)
+  -- Убираем литеральные \n и \" которые остаются из TextNode после Jsoup
+  text = text:gsub("\\n", "")
+  text = text:gsub('\\"', '"')
 
   text = removeChapterTitleDuplicate(text, ch.name or "")
   text = applyStandardContentTransforms(text)
