@@ -1,7 +1,7 @@
 ﻿-- -- Метаданные ----------------------------------------------------------------
 id       = "novelbuddy"
 name     = "NovelBuddy"
-version  = "2.6.2"
+version  = "2.6.3"
 baseUrl  = "https://novelbuddy.com"
 language = "en"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/novelbuddy.png"
@@ -44,9 +44,6 @@ local function applyStandardContentTransforms(text)
   text = regex_replace(text, "(?i)Find authorized novels in Webnovel.*?Please click www\\.webnovel\\.com for visiting\\.", "")
   text = regex_replace(text, "(?i)free.{0,10}novel\\.com", "")
   text = string_trim(text)
-  -- Убираем литеральные \n и \" которые API отдаёт как escape-последовательности
-  text = regex_replace(text, "\n", "")
-  text = regex_replace(text, '\"', '"')
   return text
 end
 
@@ -431,6 +428,7 @@ function getChapterText(html, url)
   end
 
   local content = ch.content or ch.text or ""
+  log_info("NovelBuddy: raw content[:300]=" .. content:sub(1, 300))
   if content == "" then
     log_error("NovelBuddy: empty content for " .. url)
     return ""
