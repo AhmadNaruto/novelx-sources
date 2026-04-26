@@ -1,14 +1,10 @@
 ﻿-- -- Метаданные ----------------------------------------------------------------
 id       = "novelbuddy"
 name     = "NovelBuddy"
-version  = "2.6.8"
+version  = "2.6.9"
 baseUrl  = "https://novelbuddy.com"
 language = "en"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/novelbuddy.png"
-
--- Весь контент грузим через API, сайт не трогаем вообще
-
--- -- Константы -----------------------------------------------------------------
 
 local API_BASE = "https://api.novelbuddy.com/"
 
@@ -61,9 +57,7 @@ end
 
 local function removeChapterTitleDuplicate(text, chapterName)
   if not text or text == "" or not chapterName or chapterName == "" then return text end
-
   local nameClean = chapterName:match("^%s*(.-)%s*$"):lower()
-
   local changed = true
   while changed do
     changed = false
@@ -77,7 +71,6 @@ local function removeChapterTitleDuplicate(text, chapterName)
       changed = true
     end
   end
-
   return string_trim(text)
 end
 
@@ -110,8 +103,6 @@ local function apiGet(path)
   return data
 end
 
--- Поиск по slug, возвращает первый элемент или nil
--- Обрезаем slug до первых 4 сегментов чтобы не получить 400 от API
 local function searchBySlug(slug)
   if not slug or slug == "" then return nil end
   local parts = {}
@@ -128,7 +119,6 @@ local function searchBySlug(slug)
   return items[1]
 end
 
--- Детальная инфо по ID книги
 local function fetchDetailById(mangaId, fallback)
   local data = apiGet("titles/" .. url_encode(mangaId))
   if data and data.data then
@@ -158,9 +148,10 @@ local function fetchDetailById(mangaId, fallback)
   return nil
 end
 
--- Получить ID и slug книги по её URL
 local function resolveMangaId(bookUrl)
-  local slug = slugFromUrl(bookUrl)
+  -- убираем fragment (#api=...) если есть
+  local cleanUrl = bookUrl:match("^([^#]+)") or bookUrl
+  local slug = slugFromUrl(cleanUrl)
   local item = searchBySlug(slug)
   if item and item.id then
     return item.id, item.slug or slug
@@ -168,9 +159,9 @@ local function resolveMangaId(bookUrl)
   return nil, slug
 end
 
--- Получить полные данные книги
 local function fetchBookData(bookUrl)
-  local slug = slugFromUrl(bookUrl)
+  local cleanUrl = bookUrl:match("^([^#]+)") or bookUrl
+  local slug = slugFromUrl(cleanUrl)
   local item = searchBySlug(slug)
   if not item or not item.id then return nil end
   return fetchDetailById(item.id, item)
@@ -197,25 +188,12 @@ function getCatalogList(index, filters)
   end
 
   local params = "page=" .. tostring(page) .. "&limit=24"
-
-  if sort ~= "" then
-    params = params .. "&sort=" .. url_encode(sort)
-  end
-  if status ~= "" and status ~= "all" then
-    params = params .. "&status=" .. url_encode(status)
-  end
-  if genres ~= "" then
-    params = params .. "&genres=" .. genres
-  end
-  if exclude ~= "" then
-    params = params .. "&exclude_genres=" .. exclude
-  end
-  if min_ch ~= "" then
-    params = params .. "&min_ch=" .. url_encode(tostring(min_ch))
-  end
-  if max_ch ~= "" then
-    params = params .. "&max_ch=" .. url_encode(tostring(max_ch))
-  end
+  if sort ~= "" then params = params .. "&sort=" .. url_encode(sort) end
+  if status ~= "" and status ~= "all" then params = params .. "&status=" .. url_encode(status) end
+  if genres ~= "" then params = params .. "&genres=" .. genres end
+  if exclude ~= "" then params = params .. "&exclude_genres=" .. exclude end
+  if min_ch ~= "" then params = params .. "&min_ch=" .. url_encode(tostring(min_ch)) end
+  if max_ch ~= "" then params = params .. "&max_ch=" .. url_encode(tostring(max_ch)) end
 
   local data = apiGet("titles/search?" .. params)
   if not data then return { items = {}, hasNext = false } end
@@ -335,11 +313,15 @@ function getChapterList(bookUrl)
     local title = ch.name or ch.title or ch.slug or chId
 
     if chId ~= "" then
+      local chSlug  = ch.slug or chId
+      -- URL главы — обычный URL сайта чтобы scraper нашёл источник
+      -- API URL передаём в fragment
+      local chUrl    = absUrl("/" .. (mangaSlug or "") .. "/" .. chSlug)
       local chApiUrl = API_BASE .. "titles/" .. url_encode(mangaId)
                        .. "/chapters/" .. url_encode(chId)
       table.insert(allChapters, {
         title = string_clean(title),
-        url   = chApiUrl,
+        url   = chUrl .. "#api=" .. chApiUrl,
       })
     end
   end
@@ -367,38 +349,46 @@ end
 function getChapterText(html, url)
   log_info("NovelBuddy: getChapterText called, url=" .. tostring(url))
 
-  if not url or url == "" then
-    log_error("NovelBuddy: empty url")
+  -- Достаём API URL из fragment
+  local apiUrl = url and url:match("#api=(.+)$")
+  if not apiUrl or apiUrl == "" then
+    log_error("NovelBuddy: no api url in fragment: " .. tostring(url))
     return ""
   end
 
-  log_info("NovelBuddy: fetching " .. url)
-  local r = http_get(url)
+  log_info("NovelBuddy: fetching " .. apiUrl)
+  local r = http_get(apiUrl)
+  log_info("NovelBuddy: success=" .. tostring(r and r.success)
+           .. " bodyLen=" .. tostring(r and r.body and #r.body or 0))
+
   if not r or not r.success or not r.body or r.body == "" then
-    log_error("NovelBuddy: HTTP failed, trying html body")
-    -- fallback: парсим html который передало приложение
-  else
-    local ok, apiData = pcall(json_parse, r.body)
-    if ok and apiData and apiData.data and apiData.data.chapter then
-      local ch = apiData.data.chapter
-      local content = ch.content or ch.text or ""
-      log_info("NovelBuddy: content[:200]=" .. content:sub(1, 200))
-      if content ~= "" then
-        local text = html_text(content)
-        text = text:gsub("\\n", "")
-        text = text:gsub('\\"', '"')
-        text = removeChapterTitleDuplicate(text, ch.name or "")
-        text = applyStandardContentTransforms(text)
-        return text
-      end
-    end
+    log_error("NovelBuddy: HTTP failed for " .. apiUrl)
+    return ""
   end
 
-  -- fallback: html уже загружен приложением как Jsoup документ
-  log_info("NovelBuddy: using html fallback")
-  local text = html_text(html)
+  local ok, apiData = pcall(json_parse, r.body)
+  if not ok or not apiData then
+    log_error("NovelBuddy: JSON parse failed")
+    return ""
+  end
+
+  local ch = apiData.data and apiData.data.chapter
+  if not ch then
+    log_error("NovelBuddy: no chapter object")
+    return ""
+  end
+
+  local content = ch.content or ch.text or ""
+  log_info("NovelBuddy: content[:200]=" .. content:sub(1, 200))
+  if content == "" then
+    log_error("NovelBuddy: empty content")
+    return ""
+  end
+
+  local text = html_text(content)
   text = text:gsub("\\n", "")
   text = text:gsub('\\"', '"')
+  text = removeChapterTitleDuplicate(text, ch.name or "")
   text = applyStandardContentTransforms(text)
   return text
 end
@@ -535,8 +525,6 @@ function getFilterList()
     },
   }
 end
-
--- -- Каталог с фильтрами (делегируем в getCatalogList) ------------------------
 
 function getCatalogFiltered(index, filters)
   return getCatalogList(index, filters)
