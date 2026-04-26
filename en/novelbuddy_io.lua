@@ -1,7 +1,7 @@
 ﻿-- -- Метаданные ----------------------------------------------------------------
 id       = "novelbuddy"
 name     = "NovelBuddy"
-version  = "2.5.8"
+version  = "2.5.9"
 baseUrl  = "https://novelbuddy.com"
 language = "en"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/novelbuddy.png"
@@ -57,39 +57,6 @@ local function decodeHtmlEntities(text)
   text = text:gsub("&#(%d+);",  function(n) return string.char(tonumber(n)) end)
   text = text:gsub("&#x(%x+);", function(h) return string.char(tonumber(h, 16)) end)
   return text
-end
-
-local function stripHtml(content)
-  if not content or content == "" then return "" end
-
-  -- 1. Вырезаем рекламные div со style margin (вставки между параграфами)
-  content = content:gsub(
-    "<div[^>]+style=\"[^\"]*margin[^\"]*\"[^>]*>.-</div>", "")
-
-  -- 2. <br> → перенос строки
-  content = content:gsub("<br[^>]*/?>", "\n")
-
-  -- 3. <p> и </p>: убираем пробельные символы (включая \n) вплотную к тегам.
-  --    ГЛАВНЫЙ ФИКС: API кладёт \n прямо перед </p>, например:
-  --      <p> "MOMMY!!"\n</p>
-  --    Старый код оставлял этот \n в тексте, отчего читалка показывала
-  --    лишние переносы строк и артефакты вроде \" при экранировании.
-  --    Паттерн %s* поглощает любые пробелы/табы/переносы у границ тега.
-  content = content:gsub("<p[^>]*>%s*", "\n")
-  content = content:gsub("%s*</p>",     "")
-
-  -- 4. Убираем все оставшиеся теги
-  content = content:gsub("<[^>]+>", "")
-
-  -- 5. HTML entities
-  content = decodeHtmlEntities(content)
-
-  -- 6. Хвостовые пробелы на строках и схлопывание переносов
-  content = content:gsub("[ \t]+\n", "\n")
-  content = content:gsub("\n[ \t]+", "\n")
-  content = content:gsub("\n\n\n+",  "\n\n")
-
-  return string_trim(content)
 end
 
 -- Убирает дублирующиеся строки с названием главы в начале контента.
@@ -389,10 +356,15 @@ function getChapterListHash(bookUrl)
 end
 
 -- -- Текст главы ---------------------------------------------------------------
+--
+-- API отдаёт контент как HTML-строку внутри JSON.
+-- Передаём её напрямую в html_text() — встроенную функцию приложения,
+-- которая использует Jsoup/TextExtractor и правильно обрабатывает
+-- <p>, <br>, <hr> без лишних \n и артефактов.
+-- Никакого самодельного stripHtml — он и был источником мусора.
 
 function getChapterText(html, url)
   log_info("NovelBuddy: getChapterText called, url=" .. tostring(url))
-  log_info("NovelBuddy: html length=" .. tostring(html and #html or 0))
 
   if not url or url == "" then
     log_error("NovelBuddy: getChapterText called with empty url")
@@ -400,7 +372,6 @@ function getChapterText(html, url)
   end
 
   local apiUrl = url:match("^([^#]+)") or url
-  log_info("NovelBuddy: apiUrl=" .. apiUrl)
 
   if not apiUrl:find("api%.novelbuddy", 1, true) then
     log_error("NovelBuddy: URL is not API URL, got: " .. apiUrl)
@@ -462,10 +433,18 @@ function getChapterText(html, url)
     return ""
   end
 
-  content = stripHtml(content)
-  content = removeChapterTitleDuplicate(content, ch.name or "")
-  content = applyStandardContentTransforms(content)
-  return content
+  -- html_text() — встроенная функция приложения (TextExtractor.get).
+  -- Принимает HTML-строку, обходит DOM через Jsoup:
+  --   <p>  → текст абзаца + "\n\n"
+  --   <br> → "\n"
+  --   <hr> → "\n\n"
+  --   TextNode → child.text() (без лишних escape-артефактов)
+  -- Именно так работают ranobehub и ranobelib.
+  local text = html_text(content)
+
+  text = removeChapterTitleDuplicate(text, ch.name or "")
+  text = applyStandardContentTransforms(text)
+  return text
 end
 
 -- -- Список фильтров -----------------------------------------------------------
