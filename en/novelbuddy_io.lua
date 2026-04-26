@@ -1,7 +1,7 @@
 ﻿-- -- Метаданные ----------------------------------------------------------------
 id       = "novelbuddy"
 name     = "NovelBuddy"
-version  = "2.5.0"
+version  = "2.5.1"
 baseUrl  = "https://novelbuddy.com"
 language = "en"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/novelbuddy.png"
@@ -83,6 +83,11 @@ local function stripHtml(content)
   content = regex_replace(content, "(?m)^[ \\t]+$", "")
   content = regex_replace(content, "\n{3,}", "\n\n")
   content = regex_replace(content, "(?m)^[ \t]+", "")
+
+  -- Убираем escaped кавычки и переносы которые остаются после JSON парсинга
+  content = content:gsub('\\"', '"')
+  content = content:gsub('\\n', '\n')
+  content = content:gsub('\\r', '')
 
   return string_trim(content)
 end
@@ -354,7 +359,7 @@ function getChapterList(bookUrl)
     return {}
   end
 
-  local data = apiGet("titles/" .. url_encode(mangaId) .. "/chapters?order=asc")
+  local data = apiGet("titles/" .. url_encode(mangaId) .. "/chapters")
   if not data then
     log_error("NovelBuddy: chapters API failed for id=" .. tostring(mangaId))
     return {}
@@ -379,7 +384,12 @@ function getChapterList(bookUrl)
     end
   end
 
-  return allChapters
+  -- API возвращает главы от новых к старым — переворачиваем чтобы старые были первыми
+  local reversed = {}
+  for i = #allChapters, 1, -1 do
+    table.insert(reversed, allChapters[i])
+  end
+  return reversed
 end
 
 -- -- Хэш для проверки обновлений -----------------------------------------------
