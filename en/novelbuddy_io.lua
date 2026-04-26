@@ -1,7 +1,7 @@
 ﻿-- -- Метаданные ----------------------------------------------------------------
 id       = "novelbuddy"
 name     = "NovelBuddy"
-version  = "2.6.6"
+version  = "2.6.7"
 baseUrl  = "https://novelbuddy.com"
 language = "en"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/novelbuddy.png"
@@ -368,83 +368,49 @@ function getChapterText(html, url)
   log_info("NovelBuddy: getChapterText called, url=" .. tostring(url))
 
   if not url or url == "" then
-    log_error("NovelBuddy: getChapterText called with empty url")
+    log_error("NovelBuddy: empty url")
     return ""
   end
 
   local apiUrl = url:match("^([^#]+)") or url
 
   if not apiUrl:find("api%.novelbuddy", 1, true) then
-    log_error("NovelBuddy: URL is not API URL, got: " .. apiUrl)
-    local fromFragment = url:match("#api=(.+)$")
-    if fromFragment and fromFragment ~= "" then
-      apiUrl = fromFragment
-      log_info("NovelBuddy: using API URL from fragment: " .. apiUrl)
-    else
-      log_error("NovelBuddy: cannot determine API URL, bailing out")
-      return ""
-    end
+    log_error("NovelBuddy: not API URL: " .. apiUrl)
+    return ""
   end
 
-  local apiData = nil
+  log_info("NovelBuddy: fetching " .. apiUrl)
+  local r = http_get(apiUrl)
+  log_info("NovelBuddy: success=" .. tostring(r and r.success)
+           .. " bodyLen=" .. tostring(r and r.body and #r.body or 0))
 
-  local bodyContent = html and (html:match("<body[^>]*>(.-)</body>") or html:match("<body>(.-)</body>"))
-  if bodyContent and bodyContent ~= "" then
-    bodyContent = bodyContent:gsub("&quot;", '"'):gsub("&amp;", "&"):gsub("&lt;", "<"):gsub("&gt;", ">")
-    local ok, parsed = pcall(json_parse, bodyContent)
-    if ok and type(parsed) == "table" and parsed.success and parsed.data and parsed.data.chapter then
-      log_info("NovelBuddy: got chapter from html body, skipping extra request")
-      apiData = parsed
-    else
-      log_info("NovelBuddy: html body is not valid API response, will fetch directly")
-    end
-  else
-    log_info("NovelBuddy: html body empty or not parseable")
+  if not r or not r.success or not r.body or r.body == "" then
+    log_error("NovelBuddy: HTTP failed for " .. apiUrl)
+    return ""
   end
 
-  if not apiData then
-    log_info("NovelBuddy: fetching " .. apiUrl)
-    local r = http_get(apiUrl)
-    log_info("NovelBuddy: fetch result: success=" .. tostring(r and r.success)
-             .. " bodyLen=" .. tostring(r and r.body and #r.body or 0))
-    if not r or not r.success or not r.body or r.body == "" then
-      log_error("NovelBuddy: chapter API HTTP failed for " .. apiUrl)
-      return ""
-    end
-    local ok, parsed = pcall(json_parse, r.body)
-    if not ok or not parsed then
-      log_error("NovelBuddy: JSON parse failed for " .. apiUrl
-                .. " body[:200]=" .. r.body:sub(1, 200))
-      return ""
-    end
-    apiData = parsed
+  local ok, apiData = pcall(json_parse, r.body)
+  if not ok or not apiData then
+    log_error("NovelBuddy: JSON parse failed")
+    return ""
   end
 
   local ch = apiData.data and apiData.data.chapter
   if not ch then
-    log_error("NovelBuddy: no chapter object in response for " .. url)
+    log_error("NovelBuddy: no chapter object")
     return ""
   end
 
   local content = ch.content or ch.text or ""
   log_info("NovelBuddy: raw content[:300]=" .. content:sub(1, 300))
   if content == "" then
-    log_error("NovelBuddy: empty content for " .. url)
+    log_error("NovelBuddy: empty content")
     return ""
   end
 
-  -- Если контент не HTML а plain text с escape-символами — чистим до html_text()
-  if not content:find("<[a-zA-Z]") then
-    content = content:gsub('\\"', '"')
-    content = content:gsub('\\n', '\n')
-  end
-
   local text = html_text(content)
-  log_info("NovelBuddy: text after html_text[:200]=" .. text:sub(1, 200))
-  -- Убираем литеральные \n и \" которые остаются из TextNode после Jsoup
   text = text:gsub("\\n", "")
   text = text:gsub('\\"', '"')
-
   text = removeChapterTitleDuplicate(text, ch.name or "")
   text = applyStandardContentTransforms(text)
   return text
