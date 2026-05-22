@@ -367,6 +367,10 @@ end
 
 > **Важно:** кэш живёт только в рамках одного сеанса работы плагина. Между разными вызовами движка он сбрасывается — утечек памяти нет.
 
+> **⚠️ Важно про `getChapterListHash` и `getChapterList`:**
+> - `getChapterListHash` **НЕ ДОЛЖЕН** использовать `fetchPage`. Его задача — определить, изменился ли список глав (новые главы, обновления). Если он берёт страницу из кэша, хэш всегда будет старым, и триггер обновления не сработает. Всегда используйте прямой `http_get(bookUrl)`.
+> - `getChapterList` **может** использовать `fetchPage`, но только для извлечения стабильных метаданных (например, `novelId` из `og:url`), а сам список глав получать отдельным незакэшированным запросом (AJAX, JSON API). Если же `getChapterList` парсит главы прямо из HTML страницы книги — он тоже должен использовать прямой `http_get`, а не `fetchPage`.
+
 ---
 
 ## Работа с HTML и CSS-селекторами
@@ -802,6 +806,8 @@ end
 
 ```lua
 function getChapterListHash(bookUrl)
+    -- ВАЖНО: всегда прямой http_get, НЕ fetchPage!
+    -- Кэш сделает хэш неактуальным, и обновления глав не будут обнаружены.
     local r = http_get(bookUrl)
     if not r.success then return nil end
     -- Возвращаем что-то уникально идентифицирующее текущее состояние:
@@ -1366,6 +1372,7 @@ function getChapterList(bookUrl)
 end
 
 function getChapterListHash(bookUrl)
+    -- ВАЖНО: прямой http_get, не fetchPage — нужен актуальный ответ
     local r = http_get(bookUrl)
     if not r.success then return nil end
     local el = html_select_first(r.body, ".chapter-list a:last-child")
@@ -1544,10 +1551,6 @@ function getBookDescription(bookUrl)
     local r = http_get(bookUrl)   -- запрос 2 к той же странице
     ...
 end
-function getChapterListHash(bookUrl)
-    local r = http_get(bookUrl)   -- запрос 3
-    ...
-end
 
 -- ✅ Используй fetchPage — см. раздел "Кэширование страниц"
 local _pageCache = {}
@@ -1558,6 +1561,8 @@ local function fetchPage(url)
     return r.success and r.body or nil
 end
 ```
+
+**Важно:** `getChapterListHash` **НЕ** нужно переводить на `fetchPage` — он всегда должен получать актуальный ответ через прямой `http_get`, иначе перестанут обнаруживаться новые главы.
 
 ### 8. Отсутствие log_error при отладке
 
