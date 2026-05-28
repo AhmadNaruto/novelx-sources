@@ -1,6 +1,6 @@
 id       = "meionovels"
 name     = "MeioNovels"
-version  = "1.0.1"
+version  = "1.0.2"
 baseUrl  = "https://meionovels.com"
 language = "id"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/meionovels.png"
@@ -205,14 +205,12 @@ function getChapterList(bookUrl)
         end
     end
 
-    -- Сортируем по номеру главы (ascending)
-    table.sort(chapters, function(a, b)
-        local na = tonumber(a.url:match("chapter%-(%d+)") or a.url:match("chapter-(%d+)") or "0") or 0
-        local nb = tonumber(b.url:match("chapter%-(%d+)") or b.url:match("chapter-(%d+)") or "0") or 0
-        return na < nb
-    end)
-
-    return chapters
+    -- Разворачиваем (сайт отдаёт от новых к старым → приводим к хронологическому)
+    local reversed = {}
+    for i = #chapters, 1, -1 do
+        table.insert(reversed, chapters[i])
+    end
+    return reversed
 end
 
 -- ── Текст главы ───────────────────────────────────────────────────────────────
