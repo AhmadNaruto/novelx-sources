@@ -206,16 +206,38 @@ end
 
 ## Работа с HTTP
 
+### Дефолтные заголовки
+
+Движок автоматически добавляет к **каждому** вызову `http_get`, `http_post` и `http_get_batch`:
+
+| Заголовок | Значение |
+|---|---|
+| `User-Agent` | Глобальный UA приложения (настраивается пользователем в настройках) |
+| `Referer` | `scheme://host/` из URL запроса |
+| `Accept-Language` | Локали устройства (например `ru-RU,ru;q=0.9,en-US;q=0.8`) |
+
+Плагин может **переопределить** любой из них через `config.headers` — значения из плагина имеют приоритет над дефолтами. Делай это только когда нужно конкретное значение, отличное от дефолтного (например, `Referer` на страницу книги вместо корня домена).
+
+```lua
+-- Переопределяем только то что нужно — остальные дефолты сохраняются
+local r = http_post(ajaxUrl, body, {
+    headers = {
+        ["Referer"]          = bookUrl,        -- переопределяем: нужна страница книги, не корень
+        ["X-Requested-With"] = "XMLHttpRequest", -- добавляем: дефолта нет
+        ["Accept"]           = "text/html, */*; q=0.01",
+    }
+})
+```
+
 ### http_get(url [, config])
 
 ```lua
--- Простой GET
+-- Простой GET — User-Agent, Referer, Accept-Language подставятся автоматически
 local r = http_get("https://example.com/page")
 
--- С заголовками
+-- С заголовками (только специфичные для запроса — дефолты не нужно дублировать)
 local r = http_get(url, {
     headers = {
-        ["Referer"]          = baseUrl,
         ["X-Requested-With"] = "XMLHttpRequest",
         ["Accept"]           = "application/json",
     },
@@ -234,26 +256,25 @@ end
 ### http_post(url, body [, config])
 
 ```lua
--- Form-encoded POST
+-- Form-encoded POST — Content-Type определяется автоматически по телу
 local r = http_post(
     baseUrl .. "/ajax",
     "action=loadChapters&id=" .. novelId,
     {
         headers = {
-            ["Content-Type"] = "application/x-www-form-urlencoded",
-            ["Referer"]      = baseUrl
+            ["X-Requested-With"] = "XMLHttpRequest",
+            ["Referer"]          = bookUrl  -- переопределяем если нужна страница книги, не корень
         }
     }
 )
 
--- JSON POST
+-- JSON POST — Content-Type = application/json определится автоматически
 local r = http_post(
     baseUrl .. "/api/reader",
     json_stringify({ novel_id = 123, chapter = 1 }),
     {
         headers = {
-            ["Content-Type"] = "application/json",
-            ["Origin"]       = baseUrl
+            ["Origin"] = baseUrl
         }
     }
 )
@@ -1744,6 +1765,37 @@ end
 ```
 
 **Важно:** `getChapterListHash` **НЕ** нужно переводить на `fetchPage` — он всегда должен получать актуальный ответ через прямой `http_get`, иначе перестанут обнаруживаться новые главы.
+
+### 10. Хардкод заголовков которые подставляются автоматически
+
+`User-Agent`, `Referer` и `Accept-Language` добавляются движком к каждому запросу автоматически. Дублировать их в плагине не нужно — это замусоривает код и ломает глобальные настройки (например, пользовательский UA из настроек приложения перестаёт работать).
+
+```lua
+-- ❌ Дублируем то что движок уже делает сам — UA из настроек приложения игнорируется
+local r = http_get(url, {
+    headers = {
+        ["User-Agent"]       = "Mozilla/5.0 ...",
+        ["Accept-Language"]  = "ru-RU,ru;q=0.9",
+        ["Referer"]          = baseUrl,
+        ["X-Requested-With"] = "XMLHttpRequest",
+    }
+})
+
+-- ✅ Указываем только то что движок не добавляет сам
+local r = http_get(url, {
+    headers = {
+        ["X-Requested-With"] = "XMLHttpRequest",
+    }
+})
+
+-- ✅ Переопределяем дефолт только когда нужно конкретное значение
+local r = http_post(ajaxUrl, body, {
+    headers = {
+        ["Referer"]          = bookUrl,  -- нужна страница книги, а не корень домена
+        ["X-Requested-With"] = "XMLHttpRequest",
+    }
+})
+```
 
 ### 8. Отсутствие log_error при отладке
 
