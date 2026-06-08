@@ -16,13 +16,14 @@
 8. [Работа с JSON API](#работа-с-json-api)
 9. [Каталог и пагинация](#каталог-и-пагинация)
 10. [Список глав](#список-глав)
-11. [Текст главы](#текст-главы)
-12. [Фильтры каталога](#фильтры-каталога)
-13. [Настройки плагина](#настройки-плагина)
-14. [Хелперы и утилиты](#хелперы-и-утилиты)
-15. [Полный справочник API](#полный-справочник-api)
-16. [Полный шаблон плагина](#полный-шаблон-плагина)
-17. [Частые ошибки](#частые-ошибки)
+11. [Пагинированный список глав (parsePage)](#пагинированный-список-глав-parsepage)
+12. [Текст главы](#текст-главы)
+13. [Фильтры каталога](#фильтры-каталога)
+14. [Настройки плагина](#настройки-плагина)
+15. [Хелперы и утилиты](#хелперы-и-утилиты)
+16. [Полный справочник API](#полный-справочник-api)
+17. [Полный шаблон плагина](#полный-шаблон-плагина)
+18. [Частые ошибки](#частые-ошибки)
 
 ---
 
@@ -55,6 +56,7 @@ function getChapterText(html, url) ... end
 -- 4. ОПЦИОНАЛЬНЫЕ ФУНКЦИИ
 function getBookGenres(bookUrl) ... end
 function getChapterListHash(bookUrl) ... end
+function parsePage(bookUrl, page) ... end     -- список глав с пагинацией
 function getFilterList() ... end
 function getCatalogFiltered(index, filters) ... end
 function getSettingsSchema() ... end
@@ -818,6 +820,185 @@ end
 ```
 
 ---
+
+## Пагинированный список глав (parsePage)
+
+> Используй только если у сайта список глав разбит на несколько страниц через AJAX или пагинацию.
+> Большинству плагинов это не нужно — `getChapterList` достаточно.
+
+### Зачем
+
+`getChapterList` при каждом обновлении библиотеки перезагружает все страницы.
+Если их 10 — это 10 запросов каждый раз. `parsePage` решает это: при обновлении
+движок перечитывает только последнюю страницу и догружает новые если они появились.
+
+### Что нужно реализовать
+
+Одну функцию `parsePage(bookUrl, page)` которая возвращает главы одной страницы:
+
+```lua
+function parsePage(bookUrl, page)
+    -- page — номер страницы, движок передаёт 1, 2, 3... N
+    -- возвращаем главы этой страницы + сколько страниц всего
+    return {
+        chapters   = { { title = "...", url = "..." }, ... },
+        totalPages = 10,
+    }
+end
+```
+
+Правила:
+- Главы внутри страницы — в хронологическом порядке (старые сверху, новые снизу)
+- `totalPages` — одинаковое число при каждом вызове, независимо от `page`
+- Движок запрашивает страницы 1, 2, 3... где **1 = самые старые главы**, N = самые новые
+
+### Что делает движок
+
+**Первый раз (первое обновление библиотеки после добавления книги):**
+1. Вызывает `parsePage(url, 1)` → получает главы + `totalPages = 10`
+2. Вызывает `parsePage(url, 2)`, ..., `parsePage(url, 10)`
+3. Сохраняет все главы и запоминает что последняя страница = 10
+
+**При обновлении:**
+1. Перечитывает только страницу 10 (последнюю)
+2. Если `totalPages` вырос до 11 — догружает только страницу 11
+3. Добавляет только новые главы — вместо 10 запросов делает 1–2
+
+### Про порядок страниц на сайте
+
+На разных сайтах порядок разный:
+
+**Сайт отдаёт старые главы на странице 1** (прямой порядок, как ожидает движок):
+```lua
+function parsePage(bookUrl, page)
+    local r = http_get(bookUrl .. "/chapters?page=" .. page)
+    if not r.success then return { chapters = {}, totalPages = 1 } end
+
+    local totalPages = 1
+    for _, a in ipairs(html_select(r.body, ".pagination a[href]")) do
+        local p = tonumber(a.href:match("page=(%d+)"))
+        if p and p > totalPages then totalPages = p end
+    end
+
+    local chapters = {}
+    for _, a in ipairs(html_select(r.body, ".chapter-list a[href]")) do
+        table.insert(chapters, { title = string_clean(a.text), url = absUrl(a.href) })
+    end
+
+    return { chapters = chapters, totalPages = totalPages }
+end
+```
+
+Реальный пример — `syosetu.lua` внутри `getChapterList` использует ту же логику:
+загружает страницу 1 сначала, определяет `totalPages` через `.c-pager__item--last`,
+потом страницы 2..N.
+
+---
+
+**Сайт отдаёт новые главы на странице 1** (обратный порядок, как у jaomix):
+
+Нужно инвертировать: движок просит страницу 1 (старые) → берём с сайта последнюю.
+
+```lua
+local function getTotalPages(bookUrl)
+    local r = http_get(bookUrl)
+    if not r.success then return 1 end
+    local opts = html_select(r.body, "select.sel-toc option")
+    return #opts > 0 and #opts or 1
+end
+
+local function fetchAjaxPage(bookUrl, sitePage)
+    local pr = http_post(
+        baseUrl .. "wp-admin/admin-ajax.php",
+        "action=loadpagenavchapstt&page=" .. tostring(sitePage),
+        { headers = { ["X-Requested-With"] = "XMLHttpRequest", ["Referer"] = bookUrl } }
+    )
+    if not pr.success then return {} end
+
+    local chapters = {}
+    for _, a in ipairs(html_select(pr.body, "div.title a[href]")) do
+        local h2 = html_select_first(a.html, "h2")
+        table.insert(chapters, {
+            title = h2 and string_clean(h2.text) or string_clean(a.text),
+            url   = absUrl(a.href)
+        })
+    end
+    return chapters
+end
+
+function parsePage(bookUrl, page)
+    local totalPages = getTotalPages(bookUrl)
+
+    -- Инвертируем: движок page=1 → сайт последняя страница (старые главы)
+    --              движок page=N → сайт страница 1 (новые главы)
+    local sitePage = totalPages - page + 1
+
+    local raw = fetchAjaxPage(bookUrl, sitePage)
+
+    -- Сайт внутри страницы тоже отдаёт новые сверху — разворачиваем
+    local chapters = {}
+    for i = #raw, 1, -1 do
+        table.insert(chapters, raw[i])
+    end
+
+    sleep(math.random(150, 300))
+    return { chapters = chapters, totalPages = totalPages }
+end
+```
+
+### getChapterList — оставляем как запасной вариант
+
+Движок один и тот же: если плагин не объявляет функцию `parsePage`,
+`bookChaptersPage()` вернёт `null` и движок автоматически переключится
+на `getChapterList`. Оставь его — это обеспечивает работу плагина
+на любой версии приложения и для книг, у которых `parsePage` ещё не
+запускался.
+
+```lua
+-- Пример для сайта с обратным порядком (jaomix-style)
+function getChapterList(bookUrl)
+    local totalPages = getTotalPages(bookUrl)
+    local allChapters = {}
+    for page = totalPages, 1, -1 do      -- от старых к новым
+        local raw = fetchAjaxPage(bookUrl, page)
+        for i = #raw, 1, -1 do           -- разворачиваем страницу
+            table.insert(allChapters, raw[i])
+        end
+        sleep(math.random(150, 350))
+    end
+    return allChapters
+end
+```
+
+### getChapterListHash при parsePage
+
+Используется только старым движком. Достаточно вернуть что-то уникальное
+для последнего состояния — URL первой новой главы или счётчик глав:
+
+```lua
+-- Вариант 1: URL последней главы через быстрый запрос (jaomix)
+function getChapterListHash(bookUrl)
+    local pr = http_post(
+        baseUrl .. "wp-admin/admin-ajax.php",
+        "action=loadpagenavchapstt&page=1",   -- страница 1 сайта = самые новые
+        { headers = { ["X-Requested-With"] = "XMLHttpRequest", ["Referer"] = bookUrl } }
+    )
+    if not pr.success then return nil end
+    local el = html_select_first(pr.body, "div.title a[href]")
+    return el and el.href or nil
+end
+
+-- Вариант 2: счётчик глав из API (novelbuddy, ranobehub)
+function getChapterListHash(bookUrl)
+    local manga = fetchMangaNextData(bookUrl)
+    if not manga then return nil end
+    local count = manga.stats and manga.stats.chapters_count
+    return count and tostring(count) or manga.updated_at
+end
+```
+
+---
+
 
 ## Текст главы
 
