@@ -144,7 +144,10 @@ end
 function getChapterText(html, url)
   local cleaned = html_remove(html, "script", "style", "a", ".ads-title")
   local el = html_select_first(cleaned, ".chapter-content")
-  if not el then return "" end
+  if not el then
+      log_error("royalroad: failed to find .chapter-content in " .. url)
+      return ""
+  end
   return applyStandardContentTransforms(html_text(el.html))
 end
 -- ── Жанры на странице книги ───────────────────────────────────────────────────
