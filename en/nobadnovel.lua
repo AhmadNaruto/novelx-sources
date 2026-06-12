@@ -1,4 +1,4 @@
-﻿-- ── Метаданные ────────────────────────────────────────────────────────────────
+-- ── Metadata ────────────────────────────────────────────────────────────────
 id       = "nobadnovel"
 name     = "NoBadNovel"
 version  = "1.0.0"
@@ -6,7 +6,7 @@ baseUrl  = "https://www.nobadnovel.com/"
 language = "en"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/nobadnovel.png"
 
--- ── Хелперы ───────────────────────────────────────────────────────────────────
+-- ── Helpers ───────────────────────────────────────────────────────────────────
 
 local function absUrl(href)
   if not href or href == "" then return "" end
@@ -20,13 +20,13 @@ local function applyStandardContentTransforms(text)
   text = string_normalize(text)
   local domain = baseUrl:gsub("https?://", ""):gsub("^www%.", ""):gsub("/$", "")
   text = regex_replace(text, "(?i)" .. domain .. ".*?\\n", "")
-  text = regex_replace(text, "(?i)\\A[\\s\\p{Z}\\uFEFF]*((Глава\\s+\\d+|Chapter\\s+\\d+)[^\\n\\r]*[\\n\\r\\s]*)+", "")
+  text = regex_replace(text, "(?i)\\A[\\s\\p{Z}\\uFEFF]*((Chapter\\s+\\d+)[^\\n\\r]*[\\n\\r\\s]*)+", "")
   text = regex_replace(text, "(?im)^\\s*(Translator|Editor|Proofreader|Read\\s+(at|on|latest))[:\\s][^\\n\\r]{0,70}(\\r?\\n|$)", "")
   text = string_trim(text)
   return text
 end
 
--- ── Каталог ───────────────────────────────────────────────────────────────────
+-- ── Catalog ───────────────────────────────────────────────────────────────────
 
 function getCatalogList(index)
   local url
@@ -56,7 +56,7 @@ function getCatalogList(index)
   return { items = items, hasNext = #items > 0 }
 end
 
--- ── Поиск ─────────────────────────────────────────────────────────────────────
+-- ── Search ─────────────────────────────────────────────────────────────────────
 
 function getCatalogSearch(index, query)
   local url
@@ -86,7 +86,7 @@ function getCatalogSearch(index, query)
   return { items = items, hasNext = #items > 0 }
 end
 
--- ── Детали книги ──────────────────────────────────────────────────────────────
+-- ── Book Details ──────────────────────────────────────────────────────────────
 
 function getBookTitle(bookUrl)
   local r = http_get(bookUrl)
@@ -112,7 +112,7 @@ function getBookDescription(bookUrl)
   return nil
 end
 
--- ── Список глав (NONE, порядок не меняется) ───────────────────────────────────
+-- ── Chapter List (NONE, order unchanged) ───────────────────────────────────
 
 function getChapterList(bookUrl)
   local r = http_get(bookUrl)
@@ -132,7 +132,7 @@ function getChapterList(bookUrl)
   return chapters
 end
 
--- ── Хэш для обновлений ────────────────────────────────────────────────────────
+-- ── Chapter List Hash ────────────────────────────────────────────────────────
 
 function getChapterListHash(bookUrl)
   local r = http_get(bookUrl)
@@ -142,14 +142,14 @@ function getChapterListHash(bookUrl)
   return nil
 end
 
--- ── Текст главы ───────────────────────────────────────────────────────────────
+-- ── Chapter Text ───────────────────────────────────────────────────────────────
 
 function getChapterText(html, url)
   local cleaned = html_remove(html, "script", "style", ".ads", ".adblock-service")
-  -- Jsoup: экранирование : в классах через \\
+  -- Jsoup: escaping : in classes with \\
   local el = html_select_first(cleaned, "div.text-base.sm\\:text-lg")
   if not el then
-    -- Fallback на более широкий селектор
+    -- Fallback to a broader selector
     el = html_select_first(cleaned, "div[class*=text-base]")
   end
   if not el then return "" end

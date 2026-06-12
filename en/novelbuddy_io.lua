@@ -1,4 +1,4 @@
-﻿-- Метаданные
+-- Metadata
 id       = "novelbuddy"
 name     = "NovelBuddy"
 version  = "3.0.0"
@@ -6,7 +6,7 @@ baseUrl  = "https://novelbuddy.com"
 language = "en"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/novelbuddy.png"
 
--- Отключаем детект turnstile — сайт его использует в обычном контенте
+-- Disable turnstile detection - the site uses it in normal content
 cf_options = {
     whitelist      = false,
     ignore_markers = { "turnstile", "Ray ID" }
@@ -14,7 +14,7 @@ cf_options = {
 
 local API_BASE = "https://api.novelbuddy.com/"
 
--- ── Хелперы ──────────────────────────────────────────────────────────────────
+-- ── Helpers ──────────────────────────────────────────────────────────────────
 
 local function absUrl(href)
     if not href or href == "" then return "" end
@@ -60,10 +60,10 @@ end
 local function cleanContent(text)
     if not text or text == "" then return "" end
     text = string_normalize(text)
-    -- Убираем watermarks
+    -- Remove watermarks
     text = regex_replace(text, "(?i)Find authorized novels in Webnovel.*?Please click www\\.webnovel\\.com for visiting\\.", "")
     text = regex_replace(text, "(?i)free.{0,10}novel\\.com", "")
-    -- Убираем строки с доменом сайта
+    -- Remove lines containing the site domain
     local domain = baseUrl:gsub("https?://", ""):gsub("^www%.", ""):gsub("/$", "")
     text = regex_replace(text, "(?i)" .. domain .. ".*?\\n", "")
     text = string_trim(text)
@@ -86,7 +86,7 @@ local function apiGet(path)
     return data
 end
 
--- Получить __NEXT_DATA__ из HTML страницы
+-- Get __NEXT_DATA__ from HTML page
 local function fetchNextData(url)
     log_info("NovelBuddy: fetchNextData url=" .. url)
     local r = http_get(url)
@@ -94,7 +94,7 @@ local function fetchNextData(url)
         log_error("NovelBuddy: page fetch failed: " .. url .. " code=" .. tostring(r and r.code))
         return nil
     end
-    -- Извлекаем содержимое <script id="__NEXT_DATA__">
+    -- Extract content of <script id="__NEXT_DATA__">
     local json_str = r.body:match('<script[^>]+id="__NEXT_DATA__"[^>]*>([^<]+)</script>')
     if not json_str then
         log_error("NovelBuddy: __NEXT_DATA__ not found in " .. url)
@@ -108,7 +108,7 @@ local function fetchNextData(url)
     return data
 end
 
--- Поиск по slug через API
+-- Search by slug via API
 local function searchBySlug(slug)
     if not slug or slug == "" then return nil end
     local parts = {}
@@ -124,7 +124,7 @@ local function searchBySlug(slug)
     return items[1]
 end
 
--- ── Каталог ───────────────────────────────────────────────────────────────────
+-- ── Catalog ───────────────────────────────────────────────────────────────────
 
 function getCatalogList(index, filters)
     local page   = index + 1
@@ -201,8 +201,8 @@ function getCatalogSearch(index, query)
     return { items = items, hasNext = hasNext }
 end
 
--- ── Детали книги ──────────────────────────────────────────────────────────────
--- Читаем из __NEXT_DATA__ как TS плагин
+-- ── Book Details ──────────────────────────────────────────────────────────────
+-- Read from __NEXT_DATA__ as a TS plugin
 
 local function fetchMangaNextData(bookUrl)
     local nd = fetchNextData(bookUrl)
@@ -259,11 +259,11 @@ function getBookGenres(bookUrl)
     return genres
 end
 
--- ── Список глав ───────────────────────────────────────────────────────────────
--- Сначала пробуем API, fallback — __NEXT_DATA__
+-- ── Chapter List ───────────────────────────────────────────────────────────────
+-- First try API, fallback - __NEXT_DATA__
 
 function getChapterList(bookUrl)
-    -- Получаем id книги через __NEXT_DATA__
+    -- Get book id via __NEXT_DATA__
     local manga = fetchMangaNextData(bookUrl)
     if not manga then
         log_error("NovelBuddy: cannot get manga data for " .. bookUrl)
@@ -272,7 +272,7 @@ function getChapterList(bookUrl)
 
     local mangaId = manga.id
     if mangaId and mangaId ~= "" then
-        -- Пробуем API
+        -- Try API
         local data = apiGet("titles/" .. url_encode(mangaId) .. "/chapters")
         if data then
             local inner = data.data or {}
@@ -282,13 +282,13 @@ function getChapterList(bookUrl)
                 local allChapters = {}
                 for _, ch in ipairs(rawChapters) do
                     local chUrl = ch.url or ""
-                    -- Получаем path как в TS: pathname без первого /
+                    -- Get path as in TS: pathname without the first /
                     if chUrl ~= "" then
                         if not string_starts_with(chUrl, "http") then
                             chUrl = absUrl(chUrl)
                         end
                         local path = chUrl:match("https?://[^/]+(.+)") or chUrl
-                        -- Итоговый URL главы — страница сайта (как в TS)
+                        -- Final chapter URL - site page (as in TS)
                         local fullUrl = baseUrl .. path
                         local title = ch.name or ch.title or ch.slug or ""
                         table.insert(allChapters, {
@@ -307,7 +307,7 @@ function getChapterList(bookUrl)
         end
     end
 
-    -- Fallback: главы из __NEXT_DATA__
+    -- Fallback: chapters from __NEXT_DATA__
     log_info("NovelBuddy: falling back to __NEXT_DATA__ chapters")
     local chapters = manga.chapters or {}
     local allChapters = {}
@@ -342,13 +342,13 @@ function getChapterListHash(bookUrl)
     return manga.updated_at or manga.updatedAt or nil
 end
 
--- ── Текст главы ───────────────────────────────────────────────────────────────
--- Читаем __NEXT_DATA__ как TS плагин — никакого api.novelbuddy в URL не нужно
+-- ── Chapter Text ───────────────────────────────────────────────────────────────
+-- Read __NEXT_DATA__ as TS plugin - no api.novelbuddy in URL needed
 
 function getChapterText(html, url)
     log_info("NovelBuddy: getChapterText url=" .. tostring(url))
 
-    -- Пробуем взять __NEXT_DATA__ из уже загруженного html
+    -- Try to get __NEXT_DATA__ from already loaded HTML
     local json_str = html and html:match('<script[^>]+id="__NEXT_DATA__"[^>]*>([^<]+)</script>')
 
     if not json_str or json_str == "" then
@@ -385,7 +385,7 @@ function getChapterText(html, url)
 
     log_info("NovelBuddy: content length=" .. tostring(#content))
 
-    -- Убираем watermarks как в TS
+    -- Remove watermarks like in TS
     content = regex_replace(content,
         "(?i)Find authorized novels in Webnovel.*?faster updates.*?Please click www\\.webnovel\\.com for visiting\\.",
         "")
@@ -396,7 +396,7 @@ function getChapterText(html, url)
     return text
 end
 
--- ── Фильтры ───────────────────────────────────────────────────────────────────
+-- ── Filter List ───────────────────────────────────────────────────────────────────
 
 function getCatalogFiltered(index, filters)
     return getCatalogList(index, filters)

@@ -1,4 +1,4 @@
-﻿-- ── Метаданные ────────────────────────────────────────────────────────────────
+-- ── Metadata ────────────────────────────────────────────────────────────────
 id       = "baca_lightnovel"
 name     = "Baca Lightnovel"
 version  = "1.0.1"
@@ -6,7 +6,7 @@ baseUrl  = "https://bacalightnovel.co/"
 language = "id"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/bacalightnovel.png"
 
--- ── Хелперы ───────────────────────────────────────────────────────────────────
+-- ── Helpers ───────────────────────────────────────────────────────────────────
 
 local function absUrl(href)
   if not href or href == "" then return "" end
@@ -50,7 +50,7 @@ local function parseCatalogItems(body, preferDataSrc)
   return items
 end
 
--- ── Каталог ───────────────────────────────────────────────────────────────────
+-- ── Catalog ───────────────────────────────────────────────────────────────────
 
 function getCatalogList(index)
   local url
@@ -67,7 +67,7 @@ function getCatalogList(index)
   return { items = items, hasNext = #items > 0 }
 end
 
--- ── Поиск ─────────────────────────────────────────────────────────────────────
+-- ── Search ─────────────────────────────────────────────────────────────────────
 
 function getCatalogSearch(index, query)
   local url
@@ -84,7 +84,7 @@ function getCatalogSearch(index, query)
   return { items = items, hasNext = #items > 0 }
 end
 
--- ── Детали книги ──────────────────────────────────────────────────────────────
+-- ── Book Details ──────────────────────────────────────────────────────────────
 
 function getBookTitle(bookUrl)
   local r = http_get(bookUrl)
@@ -114,7 +114,7 @@ function getBookDescription(bookUrl)
   return nil
 end
 
--- ── Список глав (NONE + reverseChapters) ─────────────────────────────────────
+-- ── Chapter List (NONE + reverseChapters) ─────────────────────────────────────
 
 function getChapterList(bookUrl)
   local r = http_get(bookUrl)
@@ -137,7 +137,7 @@ function getChapterList(bookUrl)
   return reversed
 end
 
--- ── Хэш для обновлений ────────────────────────────────────────────────────────
+-- ── Chapter List Hash ────────────────────────────────────────────────────────
 
 function getChapterListHash(bookUrl)
   local r = http_get(bookUrl)
@@ -147,7 +147,7 @@ function getChapterListHash(bookUrl)
   return nil
 end
 
--- ── Текст главы ───────────────────────────────────────────────────────────────
+-- ── Chapter Text ───────────────────────────────────────────────────────────────
 
 function getChapterText(html, url)
   local cleaned = html_remove(html, "script", "style", ".ads")
@@ -159,7 +159,7 @@ function getChapterText(html, url)
   return applyStandardContentTransforms(html_text(el.html))
 end
 
--- ── Жанры книги ───────────────────────────────────────────────────────────────
+-- ── Book Genres ───────────────────────────────────────────────────────────────
 
 function getBookGenres(bookUrl)
   local r = http_get(bookUrl)
@@ -172,7 +172,7 @@ function getBookGenres(bookUrl)
   return genres
 end
 
--- ── Список фильтров ───────────────────────────────────────────────────────────
+-- ── Filter List ───────────────────────────────────────────────────────────
 
 function getFilterList()
   return {
@@ -250,7 +250,7 @@ function getFilterList()
   }
 end
 
--- ── Каталог с фильтрами ───────────────────────────────────────────────────────
+-- ── Filtered Catalog ───────────────────────────────────────────────────────
 
 function getCatalogFiltered(index, filters)
   local page   = index + 1

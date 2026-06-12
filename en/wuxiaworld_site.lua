@@ -1,4 +1,4 @@
-﻿-- ── Метаданные ────────────────────────────────────────────────────────────────
+-- ── Metadata ────────────────────────────────────────────────────────────────
 id       = "wuxia_world_site"
 name     = "WuxiaWorld.site"
 version  = "1.0.2"
@@ -6,7 +6,7 @@ baseUrl  = "https://wuxiaworld.site/"
 language = "en"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/wuxiaworld.site.png"
 
--- ── Хелперы ───────────────────────────────────────────────────────────────────
+-- ── Helpers ───────────────────────────────────────────────────────────────────
 
 local function absUrl(href)
   if not href or href == "" then return "" end
@@ -20,13 +20,13 @@ local function applyStandardContentTransforms(text)
   text = string_normalize(text)
   local domain = baseUrl:gsub("https?://", ""):gsub("^www%.", ""):gsub("/$", "")
   text = regex_replace(text, "(?i)" .. domain .. ".*?\\n", "")
-  text = regex_replace(text, "(?i)\\A[\\s\\p{Z}\\uFEFF]*((Глава\\s+\\d+|Chapter\\s+\\d+)[^\\n\\r]*[\\n\\r\\s]*)+", "")
+  text = regex_replace(text, "(?i)\\A[\\s\\p{Z}\\uFEFF]*((Chapter\\s+\\d+)[^\\n\\r]*[\\n\\r\\s]*)+", "")
   text = regex_replace(text, "(?im)^\\s*(Translator|Editor|Proofreader|Read\\s+(at|on|latest))[:\\s][^\\n\\r]{0,70}(\\r?\\n|$)", "")
   text = string_trim(text)
   return text
 end
 
--- ── Каталог ───────────────────────────────────────────────────────────────────
+-- ── Catalog ───────────────────────────────────────────────────────────────────
 
 function getCatalogList(index)
   local page = index + 1
@@ -53,7 +53,7 @@ function getCatalogList(index)
   return { items = items, hasNext = #items > 0 }
 end
 
--- ── Поиск ─────────────────────────────────────────────────────────────────────
+-- ── Search ─────────────────────────────────────────────────────────────────────
 
 function getCatalogSearch(index, query)
   local page = index + 1
@@ -84,7 +84,7 @@ function getCatalogSearch(index, query)
   return { items = items, hasNext = #items > 0 }
 end
 
--- ── Детали книги ──────────────────────────────────────────────────────────────
+-- ── Book Details ──────────────────────────────────────────────────────────────
 
 function getBookTitle(bookUrl)
   local r = http_get(bookUrl)
@@ -111,7 +111,7 @@ function getBookDescription(bookUrl)
   return nil
 end
 
--- ── Список глав (POST AJAX) ───────────────────────────────────────────────────
+-- ── Chapter List (POST AJAX) ───────────────────────────────────────────────────
 
 function getChapterList(bookUrl)
   local ajaxUrl = bookUrl:gsub("/?$", "") .. "/ajax/chapters/"
@@ -136,13 +136,13 @@ function getChapterList(bookUrl)
     end
   end
 
-  -- API отдаёт newest-first → разворачиваем
+  -- API returns newest-first -> reverse it
   local reversed = {}
   for i = #chapters, 1, -1 do table.insert(reversed, chapters[i]) end
   return reversed
 end
 
--- ── Хэш для обновлений ────────────────────────────────────────────────────────
+-- ── Chapter List Hash ────────────────────────────────────────────────────────
 
 function getChapterListHash(bookUrl)
   local r = http_get(bookUrl)
@@ -152,7 +152,7 @@ function getChapterListHash(bookUrl)
   return nil
 end
 
--- ── Текст главы ───────────────────────────────────────────────────────────────
+-- ── Chapter Text ───────────────────────────────────────────────────────────────
 
 function getChapterText(html, url)
   local cleaned = html_remove(html, "script", ".ads", ".advertisement", ".social-share")
@@ -161,7 +161,7 @@ function getChapterText(html, url)
   return applyStandardContentTransforms(html_text(el.html))
 end
 
--- ── Жанры книги ───────────────────────────────────────────────────────────────
+-- ── Book Genres ───────────────────────────────────────────────────────────────
 
 function getBookGenres(bookUrl)
   local r = http_get(bookUrl)
@@ -174,7 +174,7 @@ function getBookGenres(bookUrl)
   return genres
 end
 
--- ── Список фильтров ───────────────────────────────────────────────────────────
+-- ── Filter List ───────────────────────────────────────────────────────────
 
 function getFilterList()
   return {
@@ -269,7 +269,7 @@ function getFilterList()
   }
 end
 
--- ── Каталог с фильтрами ───────────────────────────────────────────────────────
+-- ── Filtered Catalog ───────────────────────────────────────────────────────
 
 function getCatalogFiltered(index, filters)
   local page    = index + 1

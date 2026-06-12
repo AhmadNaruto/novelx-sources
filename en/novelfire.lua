@@ -1,11 +1,11 @@
-﻿id       = "novelfire"
+id       = "novelfire"
 name     = "NovelFire"
 version  = "1.0.6"
 baseUrl  = "https://novelfire.net"
 language = "en"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/novelfire.png"
 
--- ── Хелперы ───────────────────────────────────────────────────────────────────
+-- ── Helpers ───────────────────────────────────────────────────────────────────
 
 local function absUrl(href)
     if not href or href == "" then return "" end
@@ -19,13 +19,13 @@ local function applyStandardContentTransforms(text)
     text = string_normalize(text)
     local domain = baseUrl:gsub("https?://", ""):gsub("^www%.", ""):gsub("/$", "")
     text = regex_replace(text, "(?i)" .. domain .. ".*?\\n", "")
-    text = regex_replace(text, "(?i)\\A[\\s\\p{Z}\\uFEFF]*((Глава\\s+\\d+|Chapter\\s+\\d+)[^\\n\\r]*[\\n\\r\\s]*)+", "")
+    text = regex_replace(text, "(?i)\\A[\\s\\p{Z}\\uFEFF]*((Chapter\\s+\\d+)[^\\n\\r]*[\\n\\r\\s]*)+", "")
     text = regex_replace(text, "(?im)^\\s*(Translator|Editor|Proofreader|Read\\s+(at|on|latest))[:\\s][^\\n\\r]{0,70}(\\r?\\n|$)", "")
     text = string_trim(text)
     return text
 end
 
--- ── Каталог ───────────────────────────────────────────────────────────────────
+-- ── Catalog ───────────────────────────────────────────────────────────────────
 
 function getCatalogList(index)
     local page = index + 1
@@ -52,7 +52,7 @@ function getCatalogList(index)
     return { items = items, hasNext = #items > 0 }
 end
 
--- ── Поиск ─────────────────────────────────────────────────────────────────────
+-- ── Search ─────────────────────────────────────────────────────────────────────
 
 function getCatalogSearch(index, query)
     local page = index + 1
@@ -78,7 +78,7 @@ function getCatalogSearch(index, query)
     return { items = items, hasNext = #items > 0 }
 end
 
--- ── Детали книги ──────────────────────────────────────────────────────────────
+-- ── Book Details ──────────────────────────────────────────────────────────────
 
 function getBookTitle(bookUrl)
     local r = http_get(bookUrl)
@@ -103,17 +103,17 @@ function getBookDescription(bookUrl)
     return el and string_trim(el.text) or nil
 end
 
--- ── Список глав ───────────────────────────────────────────────────────────────
+-- ── Chapter List ───────────────────────────────────────────────────────────────
 
 function getChapterList(bookUrl)
-    -- ── Шаг 1: получаем post_id со страницы книги ──────────────────────────
+    -- ── Step 1: get post_id from book page ──────────────────────────
     local r = http_get(bookUrl)
     if not r.success then return {} end
 
     local postId = html_attr(r.body, "#novel-report", "report-post_id")
     if not postId or postId == "" then return {} end
 
-    -- ── Шаг 2: один AJAX запрос — все главы сразу ──────────────────────────
+    -- ── Step 2: one AJAX request - all chapters at once ──────────────────────────
     local ajaxUrl = baseUrl .. "/ajax/listChapterDataAjax"
     local params = "draw=1"
         .. "&columns%5B0%5D%5Bdata%5D=n_sort"
@@ -142,7 +142,7 @@ function getChapterList(bookUrl)
     local ar = http_get(ajaxUrl .. "?" .. params)
     if not ar.success then return {} end
 
-    -- ── Шаг 3: парсим JSON ─────────────────────────────────────────────────
+    -- ── Step 3: parse JSON ─────────────────────────────────────────────────
     local json = json_parse(ar.body)
     if not json or not json.data then return {} end
 
@@ -166,7 +166,7 @@ function getChapterList(bookUrl)
     return chapters
 end
 
---[[ Старый способ через HTML пагинацию (на случай если AJAX сломается)
+--[[ Old way via HTML pagination (in case AJAX breaks)
 
 function getChapterList(bookUrl)
     local bookSlug = bookUrl:match("/([^/]+)$")
@@ -227,7 +227,7 @@ function getChapterListHash(bookUrl)
     return el and string_clean(el.text) or nil
 end
 
--- ── Текст главы ───────────────────────────────────────────────────────────────
+-- ── Chapter Text ───────────────────────────────────────────────────────────────
 
 function getChapterText(html, url)
     local cleaned = html_remove(html, "script", "nav", ".ads", ".advertisement", 
@@ -235,10 +235,10 @@ function getChapterText(html, url)
     local el = html_select_first(cleaned, "#content, .chapter-content, div.entry-content")
     if not el then return "" end
     
-    -- Ключевой момент: html_text сохраняет переносы строк
+    -- Key point: html_text preserves line breaks
     return applyStandardContentTransforms(html_text(el.html))
 end
--- ── Жанры на странице книги ───────────────────────────────────────────────────
+-- ── Book Genres ───────────────────────────────────────────────────
 
 function getBookGenres(bookUrl)
   local r = http_get(bookUrl)
@@ -252,7 +252,7 @@ function getBookGenres(bookUrl)
   return genres
 end
 
--- ── Список фильтров ───────────────────────────────────────────────────────────
+-- ── Filter List ───────────────────────────────────────────────────────────
 
 function getFilterList()
   return {
@@ -400,7 +400,7 @@ function getFilterList()
   }
 end
 
--- ── Каталог с фильтрами ───────────────────────────────────────────────────────
+-- ── Filtered Catalog ───────────────────────────────────────────────────────
 
 function getCatalogFiltered(index, filters)
   local page           = index + 1

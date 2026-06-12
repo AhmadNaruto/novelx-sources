@@ -1,4 +1,4 @@
-﻿-- ── Метаданные ────────────────────────────────────────────────────────────────
+-- ── Metadata ────────────────────────────────────────────────────────────────
 id       = "royal_road"
 name     = "Royal Road"
 version  = "1.0.2"
@@ -6,7 +6,7 @@ baseUrl  = "https://www.royalroad.com"
 language = "en"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/royalroad.png"
 
--- ── Хелперы ───────────────────────────────────────────────────────────────────
+-- ── Helpers ───────────────────────────────────────────────────────────────────
 
 local function absUrl(href)
   if not href or href == "" then return "" end
@@ -26,7 +26,7 @@ local function applyStandardContentTransforms(text)
   return text
 end
 
--- ── Каталог (best-rated, постраничный) ────────────────────────────────────────
+-- ── Catalog (best-rated, paginated) ────────────────────────────────────────
 
 function getCatalogList(index)
   local url
@@ -56,7 +56,7 @@ function getCatalogList(index)
   return { items = items, hasNext = #items > 0 }
 end
 
--- ── Поиск ─────────────────────────────────────────────────────────────────────
+-- ── Search ─────────────────────────────────────────────────────────────────────
 
 function getCatalogSearch(index, query)
   local page = index + 1
@@ -82,7 +82,7 @@ function getCatalogSearch(index, query)
   return { items = items, hasNext = #items > 0 }
 end
 
--- ── Детали книги ──────────────────────────────────────────────────────────────
+-- ── Book Details ──────────────────────────────────────────────────────────────
 
 function getBookTitle(bookUrl)
   local r = http_get(bookUrl)
@@ -106,7 +106,7 @@ function getBookDescription(bookUrl)
   return el and string_trim(el.text) or nil
 end
 
--- ── Список глав (NONE — всё на странице книги) ────────────────────────────────
+-- ── Chapter List (NONE - everything on the book page) ────────────────────────────────
 
 function getChapterList(bookUrl)
   local r = http_get(bookUrl)
@@ -116,7 +116,7 @@ function getChapterList(bookUrl)
   end
 
   local chapters = {}
-  -- Таблица глав: tr.chapter-row, первая ячейка содержит ссылку
+  -- Chapter table: tr.chapter-row, the first cell contains the link
   for _, a in ipairs(html_select(r.body, "tr.chapter-row td:first-child a[href]")) do
     local chUrl = absUrl(a.href)
     if chUrl ~= "" then
@@ -129,17 +129,17 @@ function getChapterList(bookUrl)
   return chapters
 end
 
--- ── Хэш для обновлений ────────────────────────────────────────────────────────
+-- ── Chapter List Hash ────────────────────────────────────────────────────────
 
 function getChapterListHash(bookUrl)
   local r = http_get(bookUrl)
   if not r.success then return nil end
-  -- Последняя метка (дата/номер) в заголовке portlet — меняется при новых главах
+  -- Last label (date/number) in the portlet header - changes with new chapters
   local el = html_select_first(r.body, ".portlet-title .actions .label")
   return el and string_clean(el.text) or nil
 end
 
--- ── Текст главы ───────────────────────────────────────────────────────────────
+-- ── Chapter Text ───────────────────────────────────────────────────────────────
 
 function getChapterText(html, url)
   local cleaned = html_remove(html, "script", "style", "a", ".ads-title")
@@ -150,14 +150,14 @@ function getChapterText(html, url)
   end
   return applyStandardContentTransforms(html_text(el.html))
 end
--- ── Жанры на странице книги ───────────────────────────────────────────────────
+-- ── Book Genres ───────────────────────────────────────────────────
 
 function getBookGenres(bookUrl)
   local r = http_get(bookUrl)
   if not r.success then return {} end
 
   local genres = {}
-  -- span.tags содержит ссылки на жанры/теги
+  -- span.tags contains links to genres/tags
   for _, a in ipairs(html_select(r.body, "span.tags a")) do
     local label = string_trim(a.text)
     if label ~= "" then table.insert(genres, label) end
@@ -165,7 +165,7 @@ function getBookGenres(bookUrl)
   return genres
 end
 
--- ── Список фильтров ───────────────────────────────────────────────────────────
+-- ── Filter List ───────────────────────────────────────────────────────────
 
 function getFilterList()
   return {
@@ -371,7 +371,7 @@ function getFilterList()
   }
 end
 
--- ── Каталог с фильтрами ───────────────────────────────────────────────────────
+-- ── Filtered Catalog ───────────────────────────────────────────────────────
 
 function getCatalogFiltered(index, filters)
   local page     = index + 1
@@ -403,7 +403,7 @@ function getCatalogFiltered(index, filters)
             .. "&minRating=" .. minRating
             .. "&maxRating=" .. maxRating
 
-  -- genres, tags, content_warnings все идут как tagsAdd/tagsRemove
+  -- genres, tags, content_warnings all go as tagsAdd/tagsRemove
   for _, v in ipairs(genres_inc) do url = url .. "&tagsAdd="    .. v end
   for _, v in ipairs(genres_exc) do url = url .. "&tagsRemove=" .. v end
   for _, v in ipairs(tags_inc)   do url = url .. "&tagsAdd="    .. v end

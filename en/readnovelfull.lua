@@ -1,4 +1,4 @@
-﻿-- ── Метаданные ────────────────────────────────────────────────────────────────
+-- ── Metadata ────────────────────────────────────────────────────────────────
 id       = "read_novel_full"
 name     = "ReadNovelFull"
 version  = "1.0.3"
@@ -6,7 +6,7 @@ baseUrl  = "https://readnovelfull.com/"
 language = "en"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/readnovelfull.png"
 
--- ── Хелперы ───────────────────────────────────────────────────────────────────
+-- ── Helpers ───────────────────────────────────────────────────────────────────
 
 local function absUrl(href)
   if not href or href == "" then return "" end
@@ -33,7 +33,7 @@ local function applyStandardContentTransforms(text)
   return text
 end
 
--- ── Каталог ───────────────────────────────────────────────────────────────────
+-- ── Catalog ───────────────────────────────────────────────────────────────────
 
 function getCatalogList(index)
   local catalogBase = baseUrl .. "novel-list/most-popular-novel"
@@ -60,7 +60,7 @@ function getCatalogList(index)
   return { items = items, hasNext = #items > 0 }
 end
 
--- ── Поиск ─────────────────────────────────────────────────────────────────────
+-- ── Search ─────────────────────────────────────────────────────────────────────
 
 function getCatalogSearch(index, query)
   local searchBase = baseUrl:gsub("/$", "") .. "/novel-list/search?keyword=" .. url_encode(query)
@@ -87,7 +87,7 @@ function getCatalogSearch(index, query)
   return { items = items, hasNext = #items > 0 }
 end
 
--- ── Детали книги ──────────────────────────────────────────────────────────────
+-- ── Book Details ──────────────────────────────────────────────────────────────
 
 function getBookTitle(bookUrl)
   local r = http_get(bookUrl)
@@ -111,7 +111,7 @@ function getBookDescription(bookUrl)
   return el and string_trim(el.text) or nil
 end
 
--- ── Список глав (AJAX) ────────────────────────────────────────────────────────
+-- ── Chapter List (AJAX) ────────────────────────────────────────────────────────
 
 function getChapterList(bookUrl)
   local r = http_get(bookUrl)
@@ -120,7 +120,7 @@ function getChapterList(bookUrl)
     return {}
   end
 
-  -- novelId хранится в атрибуте data-novel-id элемента #rating
+  -- novelId is stored in the data-novel-id attribute of the #rating element
   local novelId = html_attr(r.body, "#rating[data-novel-id]", "data-novel-id")
   if novelId == "" then
     log_error("readnovelfull: novelId not found at " .. bookUrl)
@@ -147,7 +147,7 @@ function getChapterList(bookUrl)
   return chapters
 end
 
--- ── Хэш для обновлений ────────────────────────────────────────────────────────
+-- ── Chapter List Hash ────────────────────────────────────────────────────────
 
 function getChapterListHash(bookUrl)
   local r = http_get(bookUrl)
@@ -156,7 +156,7 @@ function getChapterListHash(bookUrl)
   return el and el.href or nil
 end
 
--- ── Текст главы ───────────────────────────────────────────────────────────────
+-- ── Chapter Text ───────────────────────────────────────────────────────────────
 
 function getChapterText(html, url)
   local cleaned = html_remove(html, "script", ".ads", ".advertisement", "h3", ".chapter-warning", ".ad-insert")
@@ -165,7 +165,7 @@ function getChapterText(html, url)
   return applyStandardContentTransforms(html_text(el.html))
 end
 
--- ── Жанры книги ───────────────────────────────────────────────────────────────
+-- ── Book Genres ───────────────────────────────────────────────────────────────
 
 function getBookGenres(bookUrl)
   local r = http_get(bookUrl)
@@ -184,7 +184,7 @@ function getBookGenres(bookUrl)
   return genres
 end
 
--- ── Список фильтров ───────────────────────────────────────────────────────────
+-- ── Filter List ───────────────────────────────────────────────────────────
 
 function getFilterList()
   return {
@@ -245,7 +245,7 @@ function getFilterList()
   }
 end
 
--- ── Каталог с фильтрами ───────────────────────────────────────────────────────
+-- ── Filtered Catalog ───────────────────────────────────────────────────────
 
 function getCatalogFiltered(index, filters)
   local page   = index + 1

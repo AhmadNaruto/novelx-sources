@@ -1,4 +1,4 @@
-﻿-- ── Метаданные ────────────────────────────────────────────────────────────────
+-- ── Metadata ────────────────────────────────────────────────────────────────
 id       = "allnovel"
 name     = "AllNovel"
 version  = "1.0.3"
@@ -6,7 +6,7 @@ baseUrl  = "https://allnovel.org/"
 language = "en"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/allnovel.png"
 
--- ── Хелперы ───────────────────────────────────────────────────────────────────
+-- ── Helpers ───────────────────────────────────────────────────────────────────
 
 local function absUrl(href)
   if not href or href == "" then return "" end
@@ -15,7 +15,7 @@ local function absUrl(href)
   return url_resolve(baseUrl, href)
 end
 
--- novelBinCoverUrl: строим URL обложки из слага книги (src из каталога игнорируем)
+-- novelBinCoverUrl: build cover URL from book slug (ignore src from catalog)
 local function transformCover(bookUrl)
   if not bookUrl or bookUrl == "" then return "" end
   local slug = string.match(bookUrl, "/([^/?#]+)%.html$") or string.match(bookUrl, "/([^/?#]+)/?$") or ""
@@ -28,13 +28,13 @@ local function applyStandardContentTransforms(text)
   text = string_normalize(text)
   local domain = baseUrl:gsub("https?://", ""):gsub("^www%.", ""):gsub("/$", "")
   text = regex_replace(text, "(?i)" .. domain .. ".*?\\n", "")
-  text = regex_replace(text, "(?i)\\A[\\s\\p{Z}\\uFEFF]*((Глава\\s+\\d+|Chapter\\s+\\d+)[^\\n\\r]*[\\n\\r\\s]*)+", "")
+  text = regex_replace(text, "(?i)\\A[\\s\\p{Z}\\uFEFF]*((Chapter\\s+\\d+)[^\\n\\r]*[\\n\\r\\s]*)+", "")
   text = regex_replace(text, "(?im)^\\s*(Translator|Editor|Proofreader|Read\\s+(at|on|latest))[:\\s][^\\n\\r]{0,70}(\\r?\\n|$)", "")
   text = string_trim(text)
   return text
 end
 
--- ── Каталог ───────────────────────────────────────────────────────────────────
+-- ── Catalog ───────────────────────────────────────────────────────────────────
 
 function getCatalogList(index)
   local page = index + 1
@@ -61,7 +61,7 @@ function getCatalogList(index)
   return { items = items, hasNext = hasNext }
 end
 
--- ── Поиск ─────────────────────────────────────────────────────────────────────
+-- ── Search ─────────────────────────────────────────────────────────────────────
 
 function getCatalogSearch(index, query)
   local page = index + 1
@@ -88,7 +88,7 @@ function getCatalogSearch(index, query)
   return { items = items, hasNext = hasNext }
 end
 
--- ── Детали книги ──────────────────────────────────────────────────────────────
+-- ── Book Details ──────────────────────────────────────────────────────────────
 
 function getBookTitle(bookUrl)
   local r = http_get(bookUrl)
@@ -116,7 +116,7 @@ function getBookDescription(bookUrl)
   return nil
 end
 
--- ── Список глав (PAGE_BASED) ──────────────────────────────────────────────────
+-- ── Chapter List (PAGE_BASED) ──────────────────────────────────────────────────
 
 function getChapterList(bookUrl)
   local r = http_get(bookUrl)
@@ -130,13 +130,13 @@ function getChapterList(bookUrl)
     if p then maxPage = tonumber(p) or 1 end
   end
 
-  -- Собираем URL всех страниц (кроме первой — она уже загружена)
+  -- Collect URLs of all pages (except the first one - it is already loaded)
   local pageUrls = {}
   for page = 2, maxPage do
     table.insert(pageUrls, bookUrl .. "?page=" .. tostring(page))
   end
 
-  -- Параллельная загрузка остальных страниц
+  -- Parallel loading of other pages
   local pageResults = {}
   if #pageUrls > 0 then
     pageResults = http_get_batch(pageUrls)
@@ -144,7 +144,7 @@ function getChapterList(bookUrl)
 
   local chapters = {}
 
-  -- Страница 1 уже есть
+  -- Page 1 is already loaded
   for _, a in ipairs(html_select(r.body, "ul.list-chapter li a")) do
     local chUrl = absUrl(a.href)
     if chUrl ~= "" then
@@ -152,7 +152,7 @@ function getChapterList(bookUrl)
     end
   end
 
-  -- Остальные страницы из batch (порядок сохранён)
+  -- Other pages from batch (order preserved)
   for _, pr in ipairs(pageResults) do
     if pr.success then
       for _, a in ipairs(html_select(pr.body, "ul.list-chapter li a")) do
@@ -167,7 +167,7 @@ function getChapterList(bookUrl)
   return chapters
 end
 
--- ── Хэш для обновлений ────────────────────────────────────────────────────────
+-- ── Chapter List Hash ────────────────────────────────────────────────────────
 
 function getChapterListHash(bookUrl)
   local r = http_get(bookUrl)
@@ -177,7 +177,7 @@ function getChapterListHash(bookUrl)
   return nil
 end
 
--- ── Текст главы ───────────────────────────────────────────────────────────────
+-- ── Chapter Text ───────────────────────────────────────────────────────────────
 
 function getChapterText(html, url)
   local cleaned = html_remove(html, "script", "style", ".ads", "h3")
@@ -186,7 +186,7 @@ function getChapterText(html, url)
   return applyStandardContentTransforms(html_text(el.html))
 end
 
--- ── Жанры книги ───────────────────────────────────────────────────────────────
+-- ── Book Genres ───────────────────────────────────────────────────────────────
 
 function getBookGenres(bookUrl)
   local r = http_get(bookUrl)
@@ -205,7 +205,7 @@ function getBookGenres(bookUrl)
   return genres
 end
 
--- ── Список фильтров ───────────────────────────────────────────────────────────
+-- ── Filter List ───────────────────────────────────────────────────────────
 
 function getFilterList()
   return {
@@ -265,7 +265,7 @@ function getFilterList()
   }
 end
 
--- ── Каталог с фильтрами ───────────────────────────────────────────────────────
+-- ── Filtered Catalog ───────────────────────────────────────────────────────
 
 function getCatalogFiltered(index, filters)
   local page   = index + 1

@@ -1,4 +1,4 @@
-﻿-- ── Метаданные ────────────────────────────────────────────────────────────────
+-- ── Metadata ────────────────────────────────────────────────────────────────
 id        = "NovelBin"
 name      = "Novel Bin"
 version   = "1.1.0"
@@ -6,7 +6,7 @@ baseUrl   = "https://novelbin.com/"
 language  = "en"
 icon      = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/novelbin.png"
 
--- ── Кэш страниц (1 запрос вместо 4–5) ────────────────────────────────────────
+-- ── Page Cache (1 request instead of 4-5) ────────────────────────────────────────
 
 local _pageCache = {}
 
@@ -20,7 +20,7 @@ local function fetchPage(url)
   return nil
 end
 
--- ── Хелперы ───────────────────────────────────────────────────────────────────
+-- ── Helpers ───────────────────────────────────────────────────────────────────
 
 local function absUrl(href)
   if not href or href == "" then return "" end
@@ -43,7 +43,7 @@ local function applyStandardContentTransforms(text)
   text = string_normalize(text)
   local domain = baseUrl:gsub("https?://", ""):gsub("^www%.", ""):gsub("/$", "")
   text = regex_replace(text, "(?i)" .. domain .. ".*?\\n", "")
-  text = regex_replace(text, "(?i)\\A[\\s\\p{Z}\\uFEFF]*((Глава\\s+\\d+|Chapter\\s+\\d+)[^\\n\\r]*[\\n\\r\\s]*)+", "")
+  text = regex_replace(text, "(?i)\\A[\\s\\p{Z}\\uFEFF]*((Chapter\\s+\\d+)[^\\n\\r]*[\\n\\r\\s]*)+", "")
   text = regex_replace(text, "(?im)^\\s*(Translator|Editor|Proofreader|Read\\s+(at|on|latest))[:\\s][^\\n\\r]{0,70}(\\r?\\n|$)", "")
   text = regex_replace(text, "(?i)Remove\\s+Ads\\s+From\\s+\\$\\d+", "")
   text = string_trim(text)
@@ -73,7 +73,7 @@ local function parseCatalogItems(body, useDataSrc)
   return items
 end
 
--- ── Каталог ───────────────────────────────────────────────────────────────────
+-- ── Catalog ───────────────────────────────────────────────────────────────────
 
 function getCatalogList(index)
   local page = index + 1
@@ -87,7 +87,7 @@ function getCatalogList(index)
   return { items = items, hasNext = #items > 0 }
 end
 
--- ── Поиск ─────────────────────────────────────────────────────────────────────
+-- ── Search ─────────────────────────────────────────────────────────────────────
 
 function getCatalogSearch(index, query)
   local page = index + 1
@@ -101,7 +101,7 @@ function getCatalogSearch(index, query)
   return { items = items, hasNext = #items > 0 }
 end
 
--- ── Детали книги (все через кэш — 1 запрос) ──────────────────────────────────
+-- ── Book Details (all via cache - 1 request) ──────────────────────────────────
 
 function getBookTitle(bookUrl)
   local body = fetchPage(bookUrl)
@@ -141,7 +141,7 @@ function getBookGenres(bookUrl)
   return genres
 end
 
--- ── Список глав (AJAX) ────────────────────────────────────────────────────────
+-- ── Chapter List (AJAX) ────────────────────────────────────────────────────────
 
 function getChapterList(bookUrl)
   local body = fetchPage(bookUrl)
@@ -174,7 +174,7 @@ function getChapterList(bookUrl)
     return {}
   end
 
-  -- Главы внутри <template>, берём его innerHTML напрямую
+  -- Chapters inside <template>, take its innerHTML directly
   local tmpl = html_select_first(ar.body, "template[data-chapter-item-template]")
   if not tmpl then
     log_error("getChapterList: template element not found")
@@ -194,7 +194,7 @@ function getChapterList(bookUrl)
   log_error("getChapterList: found " .. tostring(#chapters) .. " chapters")
   return chapters
 end
--- ── Хэш для обновлений ────────────────────────────────────────────────────────
+-- ── Chapter List Hash ────────────────────────────────────────────────────────
 
 function getChapterListHash(bookUrl)
   local r = http_get(bookUrl)
@@ -203,7 +203,7 @@ function getChapterListHash(bookUrl)
   return el and el.href or nil
 end
 
--- ── Текст главы ───────────────────────────────────────────────────────────────
+-- ── Chapter Text ───────────────────────────────────────────────────────────────
 
 function getChapterText(html)
   local el = html_select_first(html, "#chr-content")
@@ -212,7 +212,7 @@ function getChapterText(html)
   return applyStandardContentTransforms(html_text(cleaned))
 end
 
--- ── Список фильтров ───────────────────────────────────────────────────────────
+-- ── Filter List ───────────────────────────────────────────────────────────
 
 function getFilterList()
   return {
@@ -294,7 +294,7 @@ function getFilterList()
   }
 end
 
--- ── Каталог с фильтрами ───────────────────────────────────────────────────────
+-- ── Filtered Catalog ───────────────────────────────────────────────────────
 
 function getCatalogFiltered(index, filters)
   local page   = index + 1
