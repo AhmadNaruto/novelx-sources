@@ -4,6 +4,6 @@ sources:
   - id: "novelfrance"
     name: "NovelFrance"
     version: "1.1.0"
-    url: "https://raw.githubusercontent.com/HnDK0/external-sources/refs/heads/main/fr/novelfrance.lua"
-    icon: "https://raw.githubusercontent.com/HnDK0/external-sources/refs/heads/main/icons/novelfrance.png"
+    url: "https://raw.githubusercontent.com/AhmadNaruto/novelx-sources/refs/heads/refactor/improve-extensions-phase1/fr/novelfrance.lua"
+    icon: "https://raw.githubusercontent.com/AhmadNaruto/novelx-sources/refs/heads/refactor/improve-extensions-phase1/icons/novelfrance.png"
     language: "fr"
