@@ -15,7 +15,7 @@ sources:
     language: "Mtl"
   - id: "tomatomtl"
     name: "TomatoMTL"
-    version: "1.0.0"
+    version: "1.1.0"
     url: "https://raw.githubusercontent.com/HnDK0/external-sources/refs/heads/main/mtl/tomatomtl.lua"
     icon: "https://raw.githubusercontent.com/HnDK0/external-sources/refs/heads/main/icons/tomatomtl.png"
     language: "Mtl"

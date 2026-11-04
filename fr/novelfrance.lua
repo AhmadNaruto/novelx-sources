@@ -1,7 +1,7 @@
 -- ── Метаданные ───────────────────────────────────────────────────────────────
 id       = "novelfrance"
 name     = "NovelFrance"
-version  = "1.0.9"
+version  = "1.1.0"
 baseUrl  = "https://novelfrance.fr"
 language = "fr"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/novelfrance.png"
@@ -16,10 +16,14 @@ end
 
 local function applyStandardContentTransforms(text)
     if not text or text == "" then return "" end
-    text = string.gsub(text, "<br%s*/?>", "\n")
-    text = string.gsub(text, "<[^>]+>", " ")
-    text = string.gsub(text, "%s+", " ")
-    return string.trim and string.trim(text) or text
+    text = string_normalize(text)
+    local domain = baseUrl:gsub("https?://", ""):gsub("^www%.", ""):gsub("/+$", "")
+    text = regex_replace(text, "(?i)" .. domain .. ".*?\\n", "")
+    text = regex_replace(text, "(?i)\\A[\\s\\p{Z}\\uFEFF]*((Chapitre\\s+\\d+|Chapter\\s+\\d+)[^\\n\\r]*[\\n\\r\\s]*)+", "")
+    text = regex_replace(text, "(?im)^\\s*(Traducteur|Éditeur|Correcteur|Lire\\s+sur)[:\\s][^\\n\\r]{0,70}(\\r?\\n|$)", "")
+    text = regex_replace(text, "(?i)Si vous voulez avoir plus d'infos.*?discord\\.gg/[^\\s]*", "")
+    text = string_trim(text)
+    return text
 end
 
 -- Извлекает slug новеллы из URL /novel/{slug}
@@ -272,7 +276,7 @@ function getChapterText(html, chapterUrl)
         end
     end
     
-    return table.concat(paragraphs, "\n\n")
+    return applyStandardContentTransforms(table.concat(paragraphs, "\n\n"))
 end
 
 -- Fallback: парсинг текста главы из HTML (если API недоступен)
@@ -291,14 +295,7 @@ local function getChapterTextFromHtml(html)
     if not mainEl then return "" end
 
     local text = html_text(mainEl.html)
-    if not text or text == "" then return "" end
-
-    text = regex_replace(text, "(?i)\\A[\\s\\p{Z}\\uFEFF]*Chapitre\\s+\\d+[^\\n\\r]*[\\n\\r\\s]*", "")
-    text = regex_replace(text, "(?i)^\\s*\\d+\\s+[^\\n\\r]{0,100}[\\n\\r]", "")
-    text = regex_replace(text, "(?i)Si vous voulez avoir plus d'infos.*?discord\\.gg/[^\\s]*", "")
-
-    text = applyStandardContentTransforms(text)
-    return text
+    return applyStandardContentTransforms(text)
 end
 
 -- ── Фильтры ──────────────────────────────────────────────────────────────────

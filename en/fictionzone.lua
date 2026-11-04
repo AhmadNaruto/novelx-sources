@@ -1,12 +1,25 @@
 -- ── Метаданные ──
 id       = "fictionzone"
 name     = "Fiction Zone"
-version  = "1.1.0"
+version  = "1.2.0"
 baseUrl  = "https://fictionzone.net/"
 language = "en"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/fictionzone.png"
 
 -- ── Хелперы ──
+
+local function applyStandardContentTransforms(text)
+  if not text or text == "" then return "" end
+  text = string_normalize(text)
+  local domain = baseUrl:gsub("https?://", ""):gsub("^www%.", ""):gsub("/+$", "")
+  text = regex_replace(text, "(?i)" .. domain .. ".*?\\n", "")
+  text = regex_replace(text, "(?i)\\A[\\s\\p{Z}\\uFEFF]*((Chapter\\s+\\d+)[^\\n\\r]*[\\n\\r\\s]*)+", "")
+  text = regex_replace(text, "(?im)^\\s*(Translator|Editor|Proofreader|Read\\s+(at|on|latest))[:\\s][^\\n\\r]{0,70}(\\r?\\n|$)", "")
+  text = regex_replace(text, "(?m)^.*Recharge \\d+ and get \\d+ VIP coupons.*\\n?", "")
+  text = regex_replace(text, "(?m)^.*Immediate recharge.*\\n?", "")
+  text = string_trim(text)
+  return text
+end
 
 -- Все данные сайта отдаются через JSON API, спрятанный за POST-прокси
 -- /api/__api_party/fictionzone (HTML-страницы закрыты Cloudflare, а прямые
@@ -347,26 +360,12 @@ function getChapterText(html, url)
   -- Поэтому НЕ заворачиваем в <p>: иначе движок снимет теги, а вместе с ними
   -- и все переносы строк, и текст превратится в сплошную стену.
   -- Возвращаем текст с реальными \n между абзацами.
-  local content = data.content
-  content = content:gsub("\r\n", "\n"):gsub("\r", "\n")
-  content = string_normalize(content)
-
-  -- В конец залогиненного контента сайт подклеивает рекламную вставку с
-  -- акцией ("...Recharge 100 and get 500 VIP coupons!...Immediate recharge..."),
-  -- название праздника меняется (Dragon Boat Festival / Ching Ming и т.п.), но
-  -- якорные строки "Recharge N and get N VIP coupons" и "Immediate recharge"
-  -- стабильны. (?m) — ^/$ на каждой строке, поэтому вычищаем всю строку с
-  -- якорем где бы тот ни стоял; вставка всегда в конце. Авторский текст с
-  -- однокоренным "recharge" (без "VIP coupons") не затрагивается.
-  content = regex_replace(content, "(?m)^.*Recharge \\d+ and get \\d+ VIP coupons.*\\n?", "")
-  content = regex_replace(content, "(?m)^.*Immediate recharge.*\\n?", "")
-
   local paras = {}
-  for line in content:gmatch("[^\n]+") do
+  for line in data.content:gmatch("[^\n]+") do
     local t = string_trim(line)
     if t ~= "" then
       paras[#paras + 1] = t
     end
   end
-  return table.concat(paras, "\n\n")
+  return applyStandardContentTransforms(table.concat(paras, "\n\n"))
 end

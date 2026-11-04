@@ -1,7 +1,7 @@
 -- Метаданные
 id       = "novelbuddy"
 name     = "NovelBuddy"
-version  = "3.0.3"
+version  = "3.1.0"
 baseUrl  = "https://novelbuddy.me"
 language = "en"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/novelbuddy.png"
@@ -58,15 +58,18 @@ local function decodeHtmlEntities(text)
     return text
 end
 
-local function cleanContent(text)
+local function applyStandardContentTransforms(text)
     if not text or text == "" then return "" end
     text = string_normalize(text)
     -- Убираем watermarks
+    text = regex_replace(text, "(?i)Find authorized novels in Webnovel.*?faster updates.*?Please click www\\.webnovel\\.com for visiting\\.", "")
     text = regex_replace(text, "(?i)Find authorized novels in Webnovel.*?Please click www\\.webnovel\\.com for visiting\\.", "")
     text = regex_replace(text, "(?i)free.{0,10}novel\\.com", "")
     -- Убираем строки с доменом сайта
-    local domain = baseUrl:gsub("https?://", ""):gsub("^www%.", ""):gsub("/$", "")
+    local domain = baseUrl:gsub("https?://", ""):gsub("^www%.", ""):gsub("/+$", "")
     text = regex_replace(text, "(?i)" .. domain .. ".*?\\n", "")
+    text = regex_replace(text, "(?i)\\A[\\s\\p{Z}\\uFEFF]*((Chapter\\s+\\d+)[^\\n\\r]*[\\n\\r\\s]*)+", "")
+    text = regex_replace(text, "(?im)^\\s*(Translator|Editor|Proofreader|Read\\s+(at|on|latest))[:\\s][^\\n\\r]{0,70}(\\r?\\n|$)", "")
     text = string_trim(text)
     return text
 end
@@ -439,15 +442,8 @@ function getChapterText(html, url)
 
     log_info("NovelBuddy: content length=" .. tostring(#content))
 
-    -- Убираем watermarks как в TS
-    content = regex_replace(content,
-        "(?i)Find authorized novels in Webnovel.*?faster updates.*?Please click www\\.webnovel\\.com for visiting\\.",
-        "")
-    content = regex_replace(content, "(?i)free.*?novel\\.com", "")
-
     local text = html_text(content)
-    text = cleanContent(text)
-    return text
+    return applyStandardContentTransforms(text)
 end
 
 -- ── Фильтры ───────────────────────────────────────────────────────────────────

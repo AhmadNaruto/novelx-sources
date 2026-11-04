@@ -1,6 +1,6 @@
 id       = "wuxiabox"
 name     = "WuxiaBox"
-version  = "1.1.0"
+version  = "1.2.0"
 baseUrl  = "https://www.wuxiabox.com/"
 language = "en"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/wuxiabox.png"
@@ -29,10 +29,12 @@ local function fetchBookDoc(url)
 end
 
 local function applyStandardContentTransforms(str)
+	if not str or str == "" then return "" end
 	str = string_normalize(str)
-	str = regex_replace(str, "(?m)(?i)^\\s*WuxiaBox.*$\\s*", "")
-	str = regex_replace(str, "(?m)(?i)^\\s*(Chapter|Глава)\\s+\\d+[^\\n]*\\s*$", "")
-	str = regex_replace(str, "(?m)(?i)(\\n|^)\\s*(Translator|Editor|T/N|E/N|Перевод|Редакция)\\s*:\\s*[^\\n]*", "")
+	local domain = baseUrl:gsub("https?://", ""):gsub("^www%.", ""):gsub("/+$", "")
+	str = regex_replace(str, "(?i)" .. domain .. ".*?\\n", "")
+	str = regex_replace(str, "(?i)\\A[\\s\\p{Z}\\uFEFF]*((Chapter\\s+\\d+|Глава\\s+\\d+)[^\\n\\r]*[\\n\\r\\s]*)+", "")
+	str = regex_replace(str, "(?im)^\\s*(Translator|Editor|Proofreader|T/N|E/N|Перевод|Редакция|Read\\s+(at|on|latest))[:\\s][^\\n\\r]{0,70}(\\r?\\n|$)", "")
 	return string_trim(str)
 end
 
