@@ -1,6 +1,6 @@
 id       = "rewayatclub"
 name     = "Rewayat Club"
-version  = "1.0.0"
+version  = "1.1.0"
 baseUrl  = "https://api.rewayat.club/"
 language = "ar"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/rewayatclub.png"
@@ -24,6 +24,16 @@ local _api = "https://api.rewayat.club/api/"
 local _bookCache = {}
 
 -- ── Хелперы ───────────────────────────────────────────────────────────────────
+
+local function applyStandardContentTransforms(text)
+    if not text or text == "" then return "" end
+    text = string_normalize(text)
+    text = regex_replace(text, "(?i)rewayat\\.club.*?\\n", "")
+    text = regex_replace(text, "(?i)\\A[\\s\\p{Z}\\uFEFF]*((الفصل\\s+[\\d\\u0660-\\u0669]+|Chapter\\s+\\d+)[^\\n\\r]*[\\n\\r\\s]*)+", "")
+    text = regex_replace(text, "(?im)^\\s*(مترجم|ترجمة|تدقيق|محرر|فريق|المترجم)[:\\s][^\\n\\r]{0,70}(\\r?\\n|$)", "")
+    text = string_trim(text)
+    return text
+end
 
 local function absUrl(href)
     if not href or href == "" then return "" end
@@ -267,6 +277,5 @@ function getChapterText(html, url)
         end
     end
     local text = table.concat(paras, "\n\n")
-    text = string_normalize(text)
-    return string_trim(text)
+    return applyStandardContentTransforms(text)
 end

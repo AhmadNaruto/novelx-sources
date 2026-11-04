@@ -1,6 +1,6 @@
 id       = "galaxynovels"
 name     = "Galaxy Novels"
-version  = "1.0.1"
+version  = "1.1.0"
 baseUrl  = "https://galaxynovels.com/"
 language = "ar"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/galaxynovels.png"
@@ -22,13 +22,23 @@ local function absUrl(href)
     return url_resolve(baseUrl, href)
 end
 
+local function applyStandardContentTransforms(text)
+    if not text or text == "" then return "" end
+    text = string_normalize(text)
+    local domain = baseUrl:gsub("https?://", ""):gsub("^www%.", ""):gsub("/+$", "")
+    text = regex_replace(text, "(?i)" .. domain .. ".*?\\n", "")
+    text = regex_replace(text, "(?i)\\A[\\s\\p{Z}\\uFEFF]*((الفصل\\s+[\\d\\u0660-\\u0669]+|Chapter\\s+\\d+)[^\\n\\r]*[\\n\\r\\s]*)+", "")
+    text = regex_replace(text, "(?im)^\\s*(مترجم|ترجمة|تدقيق|محرر|فريق|المترجم)[:\\s][^\\n\\r]{0,70}(\\r?\\n|$)", "")
+    text = string_trim(text)
+    return text
+end
+
 -- Обложка: data-src (ленивая загрузка) или src.
--- Атрибуты с дефисом (data-*) недоступны как поля элемента — берём через html_attr.
 local function coverOf(imgEl)
     if not imgEl then return nil end
-    local ds = html_attr(imgEl.html, "img", "data-src")
+    local ds = (imgEl.attr and imgEl:attr("data-src")) or html_attr(imgEl.html or "", "img", "data-src")
     if ds and ds ~= "" and not string_starts_with(ds, "data:") then return ds end
-    local src = imgEl["src"] or ""
+    local src = (imgEl.attr and imgEl:attr("src")) or imgEl["src"] or ""
     if src == "" or string_starts_with(src, "data:") then return nil end
     return src
 end
@@ -293,22 +303,5 @@ function getChapterText(html, url)
     local cleaned = html_remove(html, "script", "style", "noscript")
     local cont = html_select_first(cleaned, ".wor-reader-text-surface")
     if not cont then return "" end
-
-    local parts = {}
-    for _, p in ipairs(html_select(cont.html, "p")) do
-        local t = html_text(p.html)
-        t = string_trim(t)
-        if t ~= "" then table.insert(parts, t) end
-    end
-
-    -- Первый абзац на сайте — повторное название главы ("الفصل N: title").
-    -- Выкидываем его, чтобы не дублировался в тексте.
-    if #parts > 0 and string_starts_with(parts[1], "الفصل") then
-        table.remove(parts, 1)
-    end
-
-    local text = table.concat(parts, "\n\n")
-    text = string_normalize(text)
-    text = string_trim(text)
-    return text
+    return applyStandardContentTransforms(html_text(cont.html))
 end

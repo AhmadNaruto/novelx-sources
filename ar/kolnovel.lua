@@ -10,7 +10,7 @@
 
 id       = "kolnovel"
 name     = "KOLNOVEL"
-version  = "1.0.0"
+version  = "1.1.0"
 baseUrl  = "https://kolnovel.com"
 language = "ar"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/refs/heads/main/icons/kolnovel.png"
@@ -50,6 +50,8 @@ local function applyStandardContentTransforms(text)
     text = string_normalize(text)
     local domain = baseUrl:gsub("https?://", ""):gsub("^www%.", ""):gsub("/$", "")
     text = regex_replace(text, "(?i)" .. domain .. ".*?\\n", "")
+    text = regex_replace(text, "(?i)\\A[\\s\\p{Z}\\uFEFF]*((الفصل\\s+[\\d\\u0660-\\u0669]+|Chapter\\s+\\d+)[^\\n\\r]*[\\n\\r\\s]*)+", "")
+    text = regex_replace(text, "(?im)^\\s*(مترجم|ترجمة|تدقيق|محرر|فريق|المترجم)[:\\s][^\\n\\r]{0,70}(\\r?\\n|$)", "")
     text = string_trim(text)
     return text
 end
@@ -321,10 +323,5 @@ function getChapterText(html, url)
     if not html or html == "" then return "" end
     local cont = html_select_first(html, "#kol_content")
     if not cont then return "" end
-    local parts = {}
-    for _, p in ipairs(html_select(cont.html, "p")) do
-        local t = string_clean(p.text)
-        if t ~= "" then table.insert(parts, t) end
-    end
-    return applyStandardContentTransforms(table.concat(parts, "\n\n"))
+    return applyStandardContentTransforms(html_text(cont.html))
 end
