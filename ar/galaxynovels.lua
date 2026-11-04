@@ -1,6 +1,6 @@
 id       = "galaxynovels"
 name     = "Galaxy Novels"
-version  = "1.0.0"
+version  = "1.0.1"
 baseUrl  = "https://galaxynovels.com/"
 language = "ar"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/galaxynovels.png"
@@ -274,9 +274,9 @@ end
 
 function getChapterListHash(bookUrl)
     -- Прямой http_get (не fetchPage): хеш должен отражать актуальное состояние.
-    local body = fetchPage(bookUrl)
-    if not body then return nil end
-    local manifestUrl = html_attr(body, "[data-wor-chapters-container]", "data-manifest-url")
+    local r = http_get(bookUrl)
+    if not r.success then return nil end
+    local manifestUrl = html_attr(r.body, "[data-wor-chapters-container]", "data-manifest-url")
     if not manifestUrl or manifestUrl == "" then return nil end
     local rm = http_get(absUrl(manifestUrl))
     if not rm.success then return nil end

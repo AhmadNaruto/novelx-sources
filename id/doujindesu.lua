@@ -4,7 +4,7 @@
 
 id         = "doujindesu"
 name       = "Doujindesu"
-version    = "1.0.0"
+version    = "1.0.1"
 baseUrl    = "https://doujin.desu.xxx"
 language   = "id"
 content_type = "manga"
@@ -355,11 +355,11 @@ end
 function getChapterListHash(bookUrl)
     -- Direct http_get, never fetch_book: the hash must notice new chapters
     local slug = bookUrl:match("/manga/([^/]+)")
-    if not slug then return "" end
+    if not slug then return nil end
     local r = http_get(baseUrl .. "/api/manga/" .. url_encode(slug))
-    if not r or not r.success then return "" end
+    if not r or not r.success then return nil end
     local d = decrypt_body(r.body)
-    if type(d) ~= "table" then return "" end
+    if type(d) ~= "table" then return nil end
     local count = 0
     if type(d.chapters) == "table" then count = #d.chapters end
     return tostring(d.updated_at or "") .. "#" .. count

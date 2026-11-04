@@ -2,7 +2,7 @@
 
 id       = "komikcast"
 name     = "Komikcast"
-version  = "1.1.0"
+version  = "1.1.1"
 baseUrl  = "https://v1.komikcast.ac/"
 language = "id"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/komikcast.webp"
@@ -318,16 +318,12 @@ function getChapterList(bookUrl)
 end
 
 function getChapterListHash(bookUrl)
-    local html = fetchBookPage(bookUrl)
-    if not html then return "" end
+    local r = http_get(bookUrl)
+    if not r.success then return nil end
 
     local slug = extractSlug(bookUrl)
-    local links = html_select(html, "a[href*='" .. slug .. "-chapter-']")
-    if #links > 0 then
-        -- Возвращаем URL последней главы (первая в списке = новейшая)
-        return links[1].href or ""
-    end
-    return ""
+    local a = html_select_first(r.body, "a[href*='" .. slug .. "-chapter-']")
+    return a and a.href or nil
 end
 
 -- ── Текст главы (manga: getChapterText → заглушка,.getPageList основной) ──

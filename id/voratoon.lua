@@ -1,6 +1,6 @@
 id       = "voratoon"
 name     = "VoraToon"
-version  = "1.0.2"
+version  = "1.0.3"
 baseUrl  = "https://v5.voratoon.com/"
 language = "id"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/voratoon.webp"
@@ -338,9 +338,9 @@ end
 
 function getChapterListHash(bookUrl)
     local slug = slugFromUrl(bookUrl)
-    if not slug then return "" end
+    if not slug then return nil end
     local chapters = apiGet("/series/" .. slug .. "/chapters")
-    if not chapters or #chapters == 0 then return "" end
+    if not chapters or #chapters == 0 then return nil end
     -- API отдаёт новые сверху — первая глава = самая новая
     local first = chapters[1]
     local d = first.data or {}

@@ -2,7 +2,7 @@
 
 id       = "komiku"
 name     = "Komiku"
-version  = "1.0.0"
+version  = "1.0.1"
 baseUrl  = "https://komiku.org/"
 language = "id"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/komiku.png"
@@ -354,17 +354,13 @@ function getChapterList(bookUrl)
 end
 
 function getChapterListHash(bookUrl)
-    local html = fetchBookPage(bookUrl)
-    if not html then return "" end
-    local rows = html_select(html, "#Daftar_Chapter tr:has(td.judulseries)")
-    if #rows == 0 then return "" end
-    -- Первая глава в HTML = самая новая
-    local a = html_select_first(rows[1], "a")
-    if a then
-        local href = a.href or ""
-        if href ~= "" then return absUrl(href) end
+    local r = http_get(bookUrl)
+    if not r.success then return nil end
+    local a = html_select_first(r.body, "#Daftar_Chapter tr:has(td.judulseries) a")
+    if a and a.href and a.href ~= "" then
+        return absUrl(a.href)
     end
-    return ""
+    return nil
 end
 
 -- ── Текст главы ──

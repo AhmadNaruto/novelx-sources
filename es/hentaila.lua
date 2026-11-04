@@ -4,7 +4,7 @@
 
 id           = "hentaila"
 name         = "Hentaila"
-version      = "1.0.0"
+version      = "1.0.1"
 baseUrl      = "https://hentaila.com"
 language     = "es"
 content_type = "video"
@@ -185,17 +185,28 @@ end
 
 -- ── Video resolution ──────────────────────────────────────────────────────────
 
+local SKIP_HOSTS = {
+    ["mega.nz"] = true,
+    ["mega.co.nz"] = true,
+    ["mediafire.com"] = true,
+    ["gofile.io"] = true,
+    ["1fichier.com"] = true,
+    ["zippyshare.com"] = true,
+}
+
+local function hostOf(url)
+    return ((url or ""):match("^https?://([^/?#:]+)") or ""):lower()
+end
+
 local function origin(url)
     local scheme, host = url:match("^(https?)://([^/?#]+)")
     if not scheme then return nil end
     return scheme .. "://" .. host .. "/"
 end
 
--- Best-effort extraction of a direct stream from an embed page.
-local function scanEmbedPage(embedUrl)
-    local r = http_get(embedUrl)
-    if not r.success then return nil, nil end
-    local body = r.body:gsub("\\/", "/")
+-- Best-effort extraction of direct stream from embed body.
+local function scanEmbedBody(body)
+    body = body:gsub("\\/", "/")
     local hls = body:match('(https?://[^"\'%s\\]+%.m3u8[^"\'%s\\]*)')
     if hls then return hls, "hls" end
     local mp4 = body:match('src:%s*"(https?://[^"]+%.mp4[^"]*)"')
@@ -204,8 +215,8 @@ local function scanEmbedPage(embedUrl)
     return nil, nil
 end
 
--- Maps one embed entry to a playable source, or nil.
-local function resolveEmbed(server, url)
+-- Maps one embed entry to an instantly-resolvable playable source, or nil.
+local function resolveDirect(server, url)
     local lower = server:lower()
 
     -- Internal CDN: /play/ is the player page, /m3u8/ is the playlist.
@@ -223,29 +234,14 @@ local function resolveEmbed(server, url)
         if fileId then
             return { url = "https://pixeldrain.com/api/file/" .. fileId, mime = "mp4" }
         end
-        return nil
     end
 
-    -- MP4Upload: needs the embed page's Referer; file URL is inside the page.
-    if lower == "mp4upload" or url:find("mp4upload", 1, true) then
-        local stream, mime = scanEmbedPage(url)
-        if stream then
-            return { url = stream, mime = mime, headers = { ["Referer"] = "https://www.mp4upload.com/" } }
-        end
-        return nil
-    end
-
-    -- HLS / unknown servers: direct playlist, or scan the embed page.
+    -- Direct m3u8 playlist.
     if url:find("%.m3u8") then
-        return { url = url, mime = "hls", headers = origin(url) and { ["Referer"] = origin(url) } or nil }
-    end
-    local stream, mime = scanEmbedPage(url)
-    if stream then
-        local src = { url = stream, mime = mime }
         local ref = origin(url)
-        if ref then src.headers = { ["Referer"] = ref } end
-        return src
+        return { url = url, mime = "hls", headers = ref and { ["Referer"] = ref } or nil }
     end
+
     return nil
 end
 
@@ -265,20 +261,46 @@ function getVideoList(episodeUrl)
     end
     embeds = embeds:gsub("\\/", "/")
 
-    local sources, seen = {}, {}
+    local entries, seen = {}, {}
     for _, track in ipairs({ "SUB", "DUB" }) do
         local list = embeds:match(track .. ":%[(.-)%]")
         if list then
             for server, url in list:gmatch('{server:"([^"]+)",%s*url:"([^"]+)"') do
-                if not seen[url] then
+                local h = hostOf(url)
+                if not seen[url] and not SKIP_HOSTS[h] then
                     seen[url] = true
-                    local src = resolveEmbed(server, url)
-                    if src then
-                        src.quality = track .. " · " .. server
-                        table.insert(sources, src)
-                    else
-                        log_info("Hentaila: skipped " .. track .. " " .. server .. " " .. url)
-                    end
+                    table.insert(entries, { track = track, server = server, url = url })
+                end
+            end
+        end
+    end
+
+    local sources = {}
+    local needScan = {}
+
+    for _, e in ipairs(entries) do
+        local direct = resolveDirect(e.server, e.url)
+        if direct then
+            direct.quality = e.track .. " · " .. e.server
+            table.insert(sources, direct)
+        else
+            table.insert(needScan, e)
+        end
+    end
+
+    if #needScan > 0 then
+        local urls = {}
+        for _, e in ipairs(needScan) do table.insert(urls, e.url) end
+        local responses = http_get_batch(urls, { timeout = 10000 }) or {}
+        for i, e in ipairs(needScan) do
+            local res = responses[i]
+            if res and res.success and type(res.body) == "string" then
+                local stream, mime = scanEmbedBody(res.body)
+                if stream then
+                    local src = { url = stream, mime = mime, quality = e.track .. " · " .. e.server }
+                    local ref = e.server:lower() == "mp4upload" and "https://www.mp4upload.com/" or origin(e.url)
+                    if ref then src.headers = { ["Referer"] = ref } end
+                    table.insert(sources, src)
                 end
             end
         end

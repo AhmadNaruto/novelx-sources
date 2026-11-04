@@ -5,7 +5,7 @@
 content_type = "video"
 id          = "aniliberty"
 name        = "AniLiberty"
-version     = "1.0.0"
+version     = "1.0.1"
 baseUrl     = "https://aniliberty.top"
 language    = "ru"
 icon        = "https://raw.githubusercontent.com/HnDK0/external-sources/refs/heads/main/icons/aniliberty.png"
@@ -243,19 +243,18 @@ function getVideoList(episodeUrl)
             break
         end
     end
-    if not episode then return nil end
+    if not episode then return {} end
     local variants = {
-        { url = episode.hls_1080, quality = "1080p" },
-        { url = episode.hls_720,  quality = "720p" },
-        { url = episode.hls_480,  quality = "480p" },
+        { url = episode.hls_1080, quality = "1080p", mime = "hls" },
+        { url = episode.hls_720,  quality = "720p",  mime = "hls" },
+        { url = episode.hls_480,  quality = "480p",  mime = "hls" },
     }
     local sources = {}
     for _, v in ipairs(variants) do
         if type(v.url) == "string" and v.url ~= "" then
-            table.insert(sources, { url = v.url, quality = v.quality })
+            table.insert(sources, { url = v.url, quality = v.quality, mime = v.mime })
         end
     end
-    if #sources == 0 then return nil end
     return sources
 end
 

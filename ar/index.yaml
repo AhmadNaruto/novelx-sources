@@ -24,7 +24,7 @@ sources:
     content_type: "video"
   - id: "galaxynovels"
     name: "Galaxy Novels"
-    version: "1.0.0"
+    version: "1.0.1"
     url: "https://raw.githubusercontent.com/HnDK0/external-sources/refs/heads/main/ar/galaxynovels.lua"
     icon: "https://raw.githubusercontent.com/HnDK0/external-sources/refs/heads/main/icons/galaxynovels.png"
     language: "ar"

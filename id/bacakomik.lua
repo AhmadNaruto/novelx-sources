@@ -2,7 +2,7 @@
 
 id       = "bacakomik"
 name     = "BacaKomik"
-version  = "1.0.0"
+version  = "1.0.1"
 baseUrl  = "https://bacakomik.my/"
 language = "id"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/bacakomik.png"
@@ -364,13 +364,12 @@ end
 function getChapterListHash(bookUrl)
     -- Прямой http_get, не fetchBookPage: кэш делает хеш неактуальным
     local r = http_get(normalizeBookUrl(bookUrl))
-    if not r.success then return "" end
+    if not r.success then return nil end
     local link = html_select_first(r.body, "#chapter_list span.lchx a")
-    if link then
-        -- Первая ссылка = самая новая глава
-        return link.href or ""
+    if link and link.href and link.href ~= "" then
+        return link.href
     end
-    return ""
+    return nil
 end
 
 -- ── Текст главы (manga: getChapterText → заглушка, getPageList основной) ──

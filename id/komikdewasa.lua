@@ -2,7 +2,7 @@
 
 id       = "komikdewasa"
 name     = "Komik Dewasa"
-version  = "1.0.0"
+version  = "1.0.1"
 baseUrl  = "https://komikdewasa.art/"
 language = "id"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/komikdewasa.png"
@@ -306,14 +306,16 @@ end
 function getChapterListHash(bookUrl)
     -- Прямой http_get, не fetchBookPage: кэш делает хеш неактуальным
     local r = http_get(normalizeBookUrl(bookUrl))
-    if not r.success then return "" end
+    if not r.success then return nil end
     local li = html_select_first(r.body, "ul.clstyle li[data-num]")
     if li then
         local a = html_select_first(li, ".eph-num a")
         -- Первая запись = самая новая глава
-        return (a and a.href) or ""
+        if a and a.href and a.href ~= "" then
+            return a.href
+        end
     end
-    return ""
+    return nil
 end
 
 -- ── Текст главы (manga: getChapterText → заглушка, getPageList основной) ──

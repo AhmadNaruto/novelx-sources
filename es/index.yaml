@@ -10,7 +10,7 @@ sources:
     content_type: "manga"
   - id: "hentaila"
     name: "Hentaila"
-    version: "1.0.0"
+    version: "1.0.1"
     url: "https://raw.githubusercontent.com/HnDK0/external-sources/refs/heads/main/es/hentaila.lua"
     icon: "https://raw.githubusercontent.com/HnDK0/external-sources/refs/heads/main/icons/hentaila.png"
     language: "es"

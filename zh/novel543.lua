@@ -186,7 +186,7 @@
 -- collides with this one because sources resolve by baseUrl.
 id       = "novel543"
 name     = "Novel543"
-version  = "1.0.4"
+version  = "1.0.5"
 baseUrl  = "https://www.novel543.com/"
 language = "zh"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/novel543.png"
@@ -1451,7 +1451,8 @@ end
 -- latest_chapter_name. Booklists: the 更新 timestamp + book count (lists
 -- change when their creator edits them).
 function getChapterListHash(bookUrl)
-  local r = fetchPageCached(bookUrl)
+  -- Direct fresh request (no cache) so background updates detect new chapters
+  local r = httpGetFollow(bookUrl)
   if not r or not r.success then return nil end
 
   if isShudanUrl(bookUrl) then
