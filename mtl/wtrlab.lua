@@ -3,7 +3,7 @@
 -- ── Metadata ───────────────────────────────────────────────────────────────
 id = "wtrlab"
 name = "WTR-LAB"
-version = "1.1.12"
+version = "1.2.0"
 baseUrl = "https://wtr-lab.com/"
 language = "MTL"
 icon = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/wtr-lab.png"
@@ -55,6 +55,16 @@ local function resolveTokens(text)
     -- legacy %{"D":"b64"} -> D
     text = text:gsub('%%{%s*"([^"]*)"%s*:%s*"[^"]*"%s*}', "%1")
     return text
+end
+
+local function applyStandardContentTransforms(text)
+    if not text or text == "" then return "" end
+    text = string_normalize(text)
+    local domain = baseUrl:gsub("https?://", ""):gsub("^www%.", ""):gsub("/+$", "")
+    text = regex_replace(text, "(?i)" .. domain .. ".*?\\n", "")
+    text = regex_replace(text, "(?i)\\A[\\s\\p{Z}\\uFEFF]*((Chapter\\s+\\d+|第[\\d〇零一二三四五六七八九十百千两]+[章节卷回部集篇])[^\\n\\r]*[\\n\\r\\s]*)+", "")
+    text = regex_replace(text, "(?im)^\\s*(Translator|Editor|Proofreader|Read\\s+(at|on|latest))[:\\s][^\\n\\r]{0,70}(\\r?\\n|$)", "")
+    return string_trim(text)
 end
 
 -- Cache TTL: 60s. os_time may be missing in a sandbox — then the cache is
@@ -1937,7 +1947,7 @@ function getChapterText(html, chapterUrl)
 
     log_info("wtrlab: parsed " .. tostring(#paragraphs) .. " paragraphs")
 
-    return table.concat(paragraphs, "\n\n")
+    return applyStandardContentTransforms(table.concat(paragraphs, "\n\n"))
 end
 
 -- ── Settings schema ──────────────────────────────────────────────────────────
