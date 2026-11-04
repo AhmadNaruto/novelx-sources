@@ -1,18 +1,22 @@
 id       = "novelfire"
 name     = "NovelFire"
-version  = "1.0.8"
+version  = "1.1.0"
 baseUrl  = "https://novelfire.net"
 language = "en"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/novelfire.png"
 
 -- ── Хелперы ───────────────────────────────────────────────────────────────────
 
-local _pageCache = {}
+local _bookDocCache = {}
 
-local function fetchBookPage(url)
-    if _pageCache[url] then return _pageCache[url] end
+local function fetchBookDoc(url)
+    if _bookDocCache[url] then return _bookDocCache[url] end
     local r = http_get(url)
-    if r.success then _pageCache[url] = r.body; return r.body end
+    if r.success then
+        local doc = r:toHtml()
+        _bookDocCache[url] = doc
+        return doc
+    end
     return nil
 end
 
@@ -34,6 +38,31 @@ local function applyStandardContentTransforms(text)
     return text
 end
 
+local function parseCards(doc)
+    if not doc then return {} end
+    local items = {}
+    for _, card in ipairs(doc:select(".novel-list > .novel-item")) do
+        local titleEl = card:selectFirst(".novel-title")
+        local linkEl  = card:selectFirst(".novel-title a")
+        local img     = card:selectFirst("img")
+        local cover   = img and (img:attr("data-src") or img:attr("src")) or ""
+        -- Рейтинг из карточки каталога: <span class="info-rating" data-rating="4.6">
+        local ratingEl = card:selectFirst(".info-rating")
+        local rating  = ratingEl and ratingEl:attr("data-rating") or nil
+        
+        if titleEl and linkEl then
+            local href = linkEl:attr("href")
+            table.insert(items, {
+                title = string_clean(titleEl:text()),
+                url   = absUrl(href),
+                cover = absUrl(cover),
+                rating = rating
+            })
+        end
+    end
+    return items
+end
+
 -- ── Каталог ───────────────────────────────────────────────────────────────────
 
 function getCatalogList(index)
@@ -43,24 +72,7 @@ function getCatalogList(index)
     local r = http_get(url)
     if not r.success then return { items = {}, hasNext = false } end
 
-    local items = {}
-    for _, card in ipairs(html_select(r.body, ".novel-list > .novel-item")) do
-        local titleEl = html_select_first(card.html, ".novel-title")
-        local linkEl  = html_select_first(card.html, ".novel-title a")
-        local cover   = html_attr(card.html, "img", "data-src")
-        if cover == "" then cover = html_attr(card.html, "img", "src") end
-        -- Рейтинг из карточки каталога: <span class="info-rating" data-rating="4.6">
-        local rating  = html_attr(card.html, ".info-rating", "data-rating")
-        
-        if titleEl and linkEl then
-            table.insert(items, {
-                title = string_clean(titleEl.text),
-                url   = absUrl(linkEl.href),
-                cover = absUrl(cover),
-                rating = rating
-            })
-        end
-    end
+    local items = parseCards(r:toHtml())
     return { items = items, hasNext = #items > 0 }
 end
 
@@ -75,16 +87,19 @@ function getCatalogSearch(index, query)
     local r = http_get(url)
     if not r.success then return { items = {}, hasNext = false } end
 
+    local doc = r:toHtml()
     local items = {}
-    for _, card in ipairs(html_select(r.body, ".novel-list.chapters .novel-item")) do
-        local titleEl = html_select_first(card.html, ".novel-title")
-        local linkEl  = html_select_first(card.html, "a")
-        local cover   = html_attr(card.html, "img", "src")
+    for _, card in ipairs(doc:select(".novel-list.chapters .novel-item")) do
+        local titleEl = card:selectFirst(".novel-title")
+        local linkEl  = card:selectFirst("a")
+        local img     = card:selectFirst("img")
+        local cover   = img and (img:attr("src") or img:attr("data-src")) or ""
         
         if titleEl and linkEl then
+            local href = linkEl:attr("href")
             table.insert(items, {
-                title = string_clean(titleEl.text),
-                url   = absUrl(linkEl.href),
+                title = string_clean(titleEl:text()),
+                url   = absUrl(href),
                 cover = absUrl(cover)
             })
         end
@@ -95,36 +110,38 @@ end
 -- ── Детали книги ──────────────────────────────────────────────────────────────
 
 function getBookTitle(bookUrl)
-    local r = http_get(bookUrl)
-    if not r.success then return nil end
-    local el = html_select_first(r.body, "h1.novel-title")
-    return el and string_clean(el.text) or nil
+    local doc = fetchBookDoc(bookUrl)
+    if not doc then return nil end
+    local el = doc:selectFirst("h1.novel-title")
+    return el and string_clean(el:text()) or nil
 end
 
 function getBookCoverImageUrl(bookUrl)
-    local r = http_get(bookUrl)
-    if not r.success then return nil end
-    local cover = html_attr(r.body, "img[src*='server-1']", "src")
-    if cover == "" then cover = html_attr(r.body, ".cover img", "src") end
-    return cover ~= "" and absUrl(cover) or nil
+    local doc = fetchBookDoc(bookUrl)
+    if not doc then return nil end
+    local img = doc:selectFirst("img[src*='server-1'], .cover img")
+    if not img then return nil end
+    local cover = img:attr("src")
+    if not cover or cover == "" then cover = img:attr("data-src") end
+    return cover and cover ~= "" and absUrl(cover) or nil
 end
 
 function getBookDescription(bookUrl)
-    local r = http_get(bookUrl)
-    if not r.success then return nil end
-    local cleaned = html_remove(r.body, "h4.lined")
-    local el = html_select_first(cleaned, ".summary .content, .summary")
-    return el and string_trim(el.text) or nil
+    local doc = fetchBookDoc(bookUrl)
+    if not doc then return nil end
+    local el = doc:selectFirst(".summary .content, .summary")
+    return el and string_trim(el:text()) or nil
 end
 
 -- ── Список глав ───────────────────────────────────────────────────────────────
 
 function getChapterList(bookUrl)
     -- ── Шаг 1: получаем post_id со страницы книги ──────────────────────────
-    local r = http_get(bookUrl)
-    if not r.success then return {} end
+    local doc = fetchBookDoc(bookUrl)
+    if not doc then return {} end
 
-    local postId = html_attr(r.body, "#novel-report", "report-post_id")
+    local reportEl = doc:selectFirst("#novel-report")
+    local postId = reportEl and reportEl:attr("report-post_id") or ""
     if not postId or postId == "" then return {} end
 
     -- ── Шаг 2: один AJAX запрос — все главы сразу ──────────────────────────
@@ -235,10 +252,10 @@ end
 ]]
 
 function getChapterListHash(bookUrl)
-    local r = http_get(bookUrl)
-    if not r.success then return nil end
-    local el = html_select_first(r.body, ".body p.latest")
-    return el and string_clean(el.text) or nil
+    local doc = fetchBookDoc(bookUrl)
+    if not doc then return nil end
+    local el = doc:selectFirst(".body p.latest")
+    return el and string_clean(el:text()) or nil
 end
 
 -- ── Текст главы ───────────────────────────────────────────────────────────────
@@ -255,12 +272,12 @@ end
 -- ── Жанры на странице книги ───────────────────────────────────────────────────
 
 function getBookGenres(bookUrl)
-  local r = http_get(bookUrl)
-  if not r.success then return {} end
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return {} end
 
   local genres = {}
-  for _, a in ipairs(html_select(r.body, ".categories .property-item")) do
-    local label = string_trim(a.text)
+  for _, a in ipairs(doc:select(".categories .property-item")) do
+    local label = string_trim(a:text())
     if label ~= "" then table.insert(genres, label) end
   end
   return genres
@@ -270,10 +287,10 @@ end
 
 -- Рейтинг книги со страницы книги: <strong class="nub">4.6</strong>
 function getBookRating(bookUrl)
-  local r = http_get(bookUrl)
-  if not r.success then return nil end
-  local el = html_select_first(r.body, ".rating .nub")
-  return el and string_clean(el.text) or nil
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  local el = doc:selectFirst(".rating .nub")
+  return el and string_clean(el:text()) or nil
 end
 
 -- ── Статус / Дата обновления ─────────────────────────────────────────────────
@@ -281,12 +298,12 @@ end
 -- Статус книги: <strong class="completed">Completed</strong> в .header-stats
 -- Класс <strong> совпадает с текстом (ongoing / completed)
 function getBookStatus(bookUrl)
-  local html = fetchBookPage(bookUrl)
-  if not html then return nil end
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
   local STATUS = { ongoing = true, completed = true, hiatus = true, dropped = true }
-  for _, el in ipairs(html_select(html, ".header-stats strong")) do
-    local v = string_clean(string_lower(el.text))
-    if STATUS[v] then return string_clean(el.text) end
+  for _, el in ipairs(doc:select(".header-stats strong")) do
+    local v = string_clean(string_lower(el:text()))
+    if STATUS[v] then return string_clean(el:text()) end
   end
   return nil
 end
@@ -294,11 +311,11 @@ end
 -- Дата обновления: <p class="update">Updated N unit(s) ago</p> в .chapter-latest-container
 -- Парсим относительную дату → YYYY-MM-DD
 function getBookLastUpdate(bookUrl)
-  local html = fetchBookPage(bookUrl)
-  if not html then return nil end
-  local el = html_select_first(html, ".chapter-latest-container .update")
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  local el = doc:selectFirst(".chapter-latest-container .update")
   if not el then return nil end
-  local text = string_trim(el.text)
+  local text = string_trim(el:text())
   local n, unit = text:match("Updated%s+(%d+)%s+(%S+)")
   if not n then return nil end
   n = tonumber(n)
@@ -485,23 +502,6 @@ function getCatalogFiltered(index, filters)
   local r = http_get(url)
   if not r.success then return { items = {}, hasNext = false } end
 
-  local items = {}
-  for _, card in ipairs(html_select(r.body, ".novel-list > .novel-item")) do
-    local titleEl = html_select_first(card.html, ".novel-title")
-    local linkEl  = html_select_first(card.html, ".novel-title a")
-    local cover   = html_attr(card.html, "img", "data-src")
-    if cover == "" then cover = html_attr(card.html, "img", "src") end
-    -- Рейтинг из карточки каталога: <span class="info-rating" data-rating="4.6">
-    local rating  = html_attr(card.html, ".info-rating", "data-rating")
-    if titleEl and linkEl then
-      table.insert(items, {
-        title = string_clean(titleEl.text),
-        url   = absUrl(linkEl.href),
-        cover = absUrl(cover),
-        rating = rating
-      })
-    end
-  end
-
+  local items = parseCards(r:toHtml())
   return { items = items, hasNext = #items > 0 }
 end
