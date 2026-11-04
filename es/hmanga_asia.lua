@@ -14,7 +14,7 @@
 
 id       = "hmanga_asia"
 name     = "HManga"
-version  = "1.2.2"
+version  = "1.2.3"
 baseUrl  = "https://hmanga.asia"
 language = "es"
 content_type = "manga"
@@ -307,6 +307,21 @@ function getCatalogFiltered(index, filters)
 end
 
 -- ── Lista de capítulos ────────────────────────────────────────────────────
+
+function getChapterListHash(bookUrl)
+    local base = string.gsub(bookUrl or "", "#.*$", "")
+    local r = http_get(base)
+    if not r.success then return nil end
+    local seriesA = html_select_first(r.body, "a[href*='/series/']")
+    if seriesA and seriesA.href then
+        local sr = http_get(seriesA.href)
+        if sr.success then
+            local a = html_select_first(sr.body, "a[rel='bookmark'], h2 a[href], h3 a[href]")
+            return a and a.href or seriesA.href
+        end
+    end
+    return base
+end
 
 function getChapterList(bookUrl)
     local base = string.gsub(bookUrl or "", "#.*$", "")

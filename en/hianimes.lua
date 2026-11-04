@@ -4,7 +4,7 @@
 
 id           = "hianimes"
 name         = "Hianime"
-version      = "1.0.0"
+version      = "1.0.1"
 baseUrl      = "https://hianimes.se"
 language     = "en"
 content_type = "video"
@@ -176,6 +176,16 @@ end
 -- Episodes are chapters, ordered oldest first; seasons are always empty here.
 -- The site fetches this list in windows of 100.
 local EPISODE_BLOCK = 100
+
+function getChapterListHash(bookUrl)
+    local slug = bookUrl:match("/watch/(.+)$")
+    if type(slug) ~= "string" or slug == "" then return nil end
+    local r = http_get(API .. "/anime/" .. slug)
+    if not r.success then return nil end
+    local d = json_parse(r.body)
+    if type(d) ~= "table" or type(d.anime) ~= "table" then return nil end
+    return tostring(d.anime.totalEpisodes or "") .. "#" .. tostring(d.anime.updatedAt or "")
+end
 
 function getChapterList(bookUrl)
     local a = fetchAnime(bookUrl)

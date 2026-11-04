@@ -4,7 +4,7 @@
 content_type = "video"
 id           = "witanime"
 name         = "WitAnime"
-version      = "1.0.2"
+version      = "1.0.3"
 baseUrl      = "https://witanime.site"
 language     = "ar"
 icon         = "https://raw.githubusercontent.com/HnDK0/external-sources/refs/heads/main/icons/witanime.png"
@@ -677,6 +677,13 @@ function getBookRating(bookUrl)
 end
 
 -- ============ Серии ============
+
+function getChapterListHash(bookUrl)
+    local r = http_get(bookUrl)
+    if not r.success then return nil end
+    local el = html_select_first(r.body, "a[href*='/watch/']")
+    return el and el.href or nil
+end
 
 function getChapterList(bookUrl)
     local r = http_get(bookUrl)

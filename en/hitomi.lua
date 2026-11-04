@@ -9,7 +9,7 @@
 -- ── Метаданные ──
 id           = "hitomi"
 name         = "Hitomi"
-version  = "1.14.3"
+version  = "1.14.4"
 baseUrl      = "https://hitomi.la/"
 language     = "en"
 content_type = "manga"
@@ -910,6 +910,11 @@ function getCatalogFiltered(index, filters)
 end
 
 -- ── Чтение галереи (манга) ──
+
+function getChapterListHash(bookUrl)
+	local id = galleryIdFromUrl(bookUrl)
+	return id and tostring(id) or nil
+end
 
 -- Список глав: вся галерея — одна «глава» (набор картинок).
 function getChapterList(bookUrl)

@@ -14,7 +14,7 @@
 
 id           = "tmohentai"
 name         = "TMOHentai"
-version      = "5.1.0"
+version      = "5.1.1"
 baseUrl      = "https://tmohentai.app"
 language     = "es"
 content_type = "manga"
@@ -182,6 +182,13 @@ local GENERIC_LABELS = {
     ["leer ahora"] = true, ["ver ahora"] = true, ["iniciar lectura"] = true,
     ["leer online"] = true, ["leer obra"] = true,
 }
+
+function getChapterListHash(bookUrl)
+    local r = http_get(bookUrl)
+    if not r.success then return nil end
+    local a = html_select_first(r.body, "a[href*='/view_uploads/']")
+    return a and a.href or nil
+end
 
 function getChapterList(bookUrl)
     local chapters, seen = {}, {}

@@ -13,7 +13,7 @@
 
 id           = "latanime"
 name         = "Latanime"
-version      = "2.2.2"
+version      = "2.2.3"
 baseUrl      = "https://latanime.org"
 language     = "es"
 content_type = "video"
@@ -191,6 +191,13 @@ end
 -- =====================================================================
 -- CAPÍTULOS (EPISODIOS)
 -- =====================================================================
+
+function getChapterListHash(bookUrl)
+    local r = http_get(bookUrl)
+    if not r.success then return nil end
+    local a = html_select_first(r.body, "a[href*='/ver/']")
+    return a and a.href or nil
+end
 
 function getChapterList(bookUrl)
     local body = fetchPage(bookUrl)

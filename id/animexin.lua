@@ -5,7 +5,7 @@
 
 id           = "animexin"
 name         = "Animexin"
-version      = "1.0.0"
+version      = "1.0.1"
 baseUrl      = "https://animexin.dev"
 language     = "id"
 content_type = "video"
@@ -293,6 +293,13 @@ function getChapterList(bookUrl)
         end
     end
     return chapters
+end
+
+function getChapterListHash(bookUrl)
+    local r = http_get(bookUrl, { timeout = 10000 })
+    if not r.success then return nil end
+    local link = html_select_first(r.body, ".eplister li a[href]")
+    return link and link.href or nil
 end
 
 -- ─── Хостеры ────────────────────────────────────────────────────────────────

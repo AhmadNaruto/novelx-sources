@@ -1,7 +1,7 @@
 id       = "asurascans"
 name     = "Asura Scans"
--- Version: 1.7.1
-version  = "1.7.1"
+-- Version: 1.7.2
+version  = "1.7.2"
 baseUrl  = "https://asurascans.com"
 language = "en"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/asurascans.webp"
@@ -259,6 +259,13 @@ function getBookLastUpdate(bookUrl)
         end
     end
     return nil
+end
+
+function getChapterListHash(bookUrl)
+    local body = fetch(bookUrl)
+    if not body then return nil end
+    local a = html_select_first(body, "a[href*='/chapter/']")
+    return a and a.href or nil
 end
 
 function getChapterList(bookUrl)

@@ -3,7 +3,7 @@
 content_type = "video"
 id           = "anime4up"
 name         = "Anime4Up"
-version      = "1.0.2"
+version      = "1.0.3"
 baseUrl      = "https://w1.anime4up.rest"
 language     = "ar"
 icon         = "https://raw.githubusercontent.com/HnDK0/external-sources/refs/heads/main/icons/anime4up.png"
@@ -263,6 +263,13 @@ end
 -- Три селектора: текущий дизайн (div.ep_num), карточки-плитки старого дизайна
 -- (div.episodes-card-title) и боковой список на странице серии.
 local CHAPTER_SELECTOR = "div.ep_num > a, div.episodes-card-title > h3 > a, ul.all-episodes-list li > a"
+
+function getChapterListHash(bookUrl)
+    local r = http_get(bookUrl)
+    if not r.success then return nil end
+    local el = html_select_first(r.body, CHAPTER_SELECTOR)
+    return el and el.href or nil
+end
 
 function getChapterList(bookUrl)
     local r = http_get(bookUrl)

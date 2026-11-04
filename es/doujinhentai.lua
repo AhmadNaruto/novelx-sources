@@ -3,7 +3,7 @@
 
 id = "doujinhentai"
 name = "DoujinHentai"
-version = "1.0.1"
+version = "1.0.2"
 baseUrl = "https://doujinhentai.net/"
 icon = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/doujinhentai.png"
 language = "es"
@@ -329,6 +329,15 @@ function getBookLastUpdate(bookUrl)
 end
 
 -- ── Список глав ──
+
+function getChapterListHash(bookUrl)
+    local slug = getSlug(bookUrl)
+    if not slug then return nil end
+    local r = http_get(bookUrl)
+    if not r.success then return nil end
+    local a = html_select_first(r.body, "a[href*='/manga-hentai/" .. slug .. "/']")
+    return a and a.href or nil
+end
 
 function getChapterList(bookUrl)
     local html = fetchPage(bookUrl)
