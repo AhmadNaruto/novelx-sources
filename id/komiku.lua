@@ -2,7 +2,7 @@
 
 id       = "komiku"
 name     = "Komiku"
-version  = "1.0.1"
+version  = "1.1.0"
 baseUrl  = "https://komiku.org/"
 language = "id"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/komiku.png"
@@ -14,7 +14,7 @@ local API_BASE = "https://api.komiku.org"
 
 -- ── Хелперы ──
 
-local _pageCache = {}
+local _bookDocCache = {}
 
 local function absUrl(href)
     if not href or href == "" then return "" end
@@ -23,14 +23,13 @@ local function absUrl(href)
     return url_resolve(baseUrl, href)
 end
 
-local function fetchBookPage(url)
-    if _pageCache[url] then return _pageCache[url] end
+local function fetchBookDoc(url)
+    if _bookDocCache[url] then return _bookDocCache[url] end
     local r = http_get(url)
-    if r.success then
-        _pageCache[url] = r.body
-        return r.body
-    end
-    return nil
+    if not r.success then return nil end
+    local doc = r:toHtml()
+    if doc then _bookDocCache[url] = doc end
+    return doc
 end
 
 local function cleanTitle(title)
@@ -46,21 +45,22 @@ local function stripQuery(url)
 end
 
 -- Парсинг карточек каталога (общий для list/search/filtered)
-local function parseCatalogItems(body)
-    local cards = html_select(body, "div.bge")
+local function parseCatalogItems(doc)
+    if not doc then return {}, false end
+    local cards = doc:select("div.bge")
     local items = {}
     for _, card in ipairs(cards) do
-        local titleEl = html_select_first(card, "h3")
-        local linkEl = html_select_first(card, "a:has(h3)")
-        local imgEl = html_select_first(card, "img")
+        local titleEl = card:selectFirst("h3")
+        local linkEl = card:selectFirst("a:has(h3)")
+        local imgEl = card:selectFirst("img")
         if titleEl and linkEl then
-            local href = linkEl.href or ""
+            local href = linkEl.href or linkEl:attr("href") or ""
             local cover = ""
             if imgEl then
-                cover = stripQuery(imgEl.src or "")
+                cover = stripQuery(imgEl:attr("src") or imgEl.src or "")
             end
             table.insert(items, {
-                title = cleanTitle(titleEl.text),
+                title = cleanTitle(titleEl:text()),
                 url   = absUrl(href),
                 cover = cover,
             })
@@ -80,7 +80,8 @@ function getCatalogList(index)
     local r = http_get(url)
     if not r.success then return { items = {}, hasNext = false } end
 
-    local items, hasNext = parseCatalogItems(r.body)
+    local doc = r:toHtml()
+    local items, hasNext = parseCatalogItems(doc)
     return { items = items, hasNext = hasNext }
 end
 
@@ -93,7 +94,8 @@ function getCatalogSearch(index, query)
     local r = http_get(url)
     if not r.success then return { items = {}, hasNext = false } end
 
-    local items, hasNext = parseCatalogItems(r.body)
+    local doc = r:toHtml()
+    local items, hasNext = parseCatalogItems(doc)
     return { items = items, hasNext = hasNext }
 end
 
@@ -247,58 +249,60 @@ function getCatalogFiltered(index, filters)
     local r = http_get(url)
     if not r.success then return { items = {}, hasNext = false } end
 
-    local items, hasNext = parseCatalogItems(r.body)
+    local doc = r:toHtml()
+    local items, hasNext = parseCatalogItems(doc)
     return { items = items, hasNext = hasNext }
 end
 
 -- ── Детали книги ──
 
 function getBookTitle(bookUrl)
-    local html = fetchBookPage(bookUrl)
-    if not html then return nil end
-    local el = html_select_first(html, "h1")
-    return el and cleanTitle(el.text) or nil
+    local doc = fetchBookDoc(bookUrl)
+    if not doc then return nil end
+    local el = doc:selectFirst("h1")
+    return el and cleanTitle(el:text()) or nil
 end
 
 function getBookCoverImageUrl(bookUrl)
-    local html = fetchBookPage(bookUrl)
-    if not html then return nil end
-    local el = html_select_first(html, "div.ims img") or html_select_first(html, "img[itemprop=image]")
+    local doc = fetchBookDoc(bookUrl)
+    if not doc then return nil end
+    local el = doc:selectFirst("div.ims img") or doc:selectFirst("img[itemprop=image]")
     if el then
-        return stripQuery(el.src or "")
+        local src = el:attr("src") or el.src or ""
+        return stripQuery(src)
     end
     return nil
 end
 
 function getBookDescription(bookUrl)
-    local html = fetchBookPage(bookUrl)
-    if not html then return nil end
-    local el = html_select_first(html, "#Sinopsis > p") or html_select_first(html, "p.desc[itemprop=description]")
-    return el and el.text or nil
+    local doc = fetchBookDoc(bookUrl)
+    if not doc then return nil end
+    local el = doc:selectFirst("#Sinopsis > p") or doc:selectFirst("p.desc[itemprop=description]")
+    return el and el:text() or nil
 end
 
 function getBookGenres(bookUrl)
-    local html = fetchBookPage(bookUrl)
-    if not html then return nil end
-    local els = html_select(html, "ul.genre li.genre a span")
+    local doc = fetchBookDoc(bookUrl)
+    if not doc then return nil end
+    local els = doc:select("ul.genre li.genre a span")
     local genres = {}
     for _, el in ipairs(els) do
-        local g = el.text
+        local g = el:text()
         if g and g ~= "" then table.insert(genres, g) end
     end
     return #genres > 0 and genres or nil
 end
 
 function getBookStatus(bookUrl)
-    local html = fetchBookPage(bookUrl)
-    if not html then return nil end
-    local rows = html_select(html, "table.inftable tr")
+    local doc = fetchBookDoc(bookUrl)
+    if not doc then return nil end
+    local rows = doc:select("table.inftable tr")
     for _, row in ipairs(rows) do
-        local tds = html_select(row, "td")
+        local tds = row:select("td")
         if #tds >= 2 then
-            local key = tds[1].text
+            local key = tds[1]:text()
             if key and key:find("Status") then
-                return tds[2].text
+                return tds[2]:text()
             end
         end
     end
@@ -306,15 +310,15 @@ function getBookStatus(bookUrl)
 end
 
 function getBookLastUpdate(bookUrl)
-    local html = fetchBookPage(bookUrl)
-    if not html then return nil end
-    local rows = html_select(html, "table.inftable tr")
+    local doc = fetchBookDoc(bookUrl)
+    if not doc then return nil end
+    local rows = doc:select("table.inftable tr")
     for _, row in ipairs(rows) do
-        local tds = html_select(row, "td")
+        local tds = row:select("td")
         if #tds >= 2 then
-            local key = tds[1].text
+            local key = tds[1]:text()
             if key and key:find("Update") then
-                local val = tds[2].text
+                local val = tds[2]:text()
                 -- Формат dd/mm/yyyy
                 local d, m, y = val:match("(%d%d)/(%d%d)/(%d%d%d%d)")
                 if d and m and y then return y .. "-" .. m .. "-" .. d end
@@ -327,15 +331,15 @@ end
 -- ── Список глав ──
 
 function getChapterList(bookUrl)
-    local html = fetchBookPage(bookUrl)
-    if not html then return {} end
-    local rows = html_select(html, "#Daftar_Chapter tr:has(td.judulseries)")
+    local doc = fetchBookDoc(bookUrl)
+    if not doc then return {} end
+    local rows = doc:select("#Daftar_Chapter tr:has(td.judulseries)")
     local chapters = {}
     for _, row in ipairs(rows) do
-        local a = html_select_first(row, "a")
+        local a = row:selectFirst("a")
         if a then
-            local title = a.text
-            local href = a.href or ""
+            local title = a:text()
+            local href = a.href or a:attr("href") or ""
             if title and href ~= "" then
                 table.insert(chapters, {
                     title = title,
@@ -354,11 +358,17 @@ function getChapterList(bookUrl)
 end
 
 function getChapterListHash(bookUrl)
+    -- Прямой http_get, не fetchBookDoc: кэш делает хеш неактуальным
     local r = http_get(bookUrl)
     if not r.success then return nil end
-    local a = html_select_first(r.body, "#Daftar_Chapter tr:has(td.judulseries) a")
-    if a and a.href and a.href ~= "" then
-        return absUrl(a.href)
+    local doc = r:toHtml()
+    if not doc then return nil end
+    local a = doc:selectFirst("#Daftar_Chapter tr:has(td.judulseries) a")
+    if a then
+        local href = a.href or a:attr("href") or ""
+        if href ~= "" then
+            return absUrl(href)
+        end
     end
     return nil
 end

@@ -1,7 +1,7 @@
 -- ── Метаданные ────────────────────────────────────────────────────────────────
 id       = "indowebnovel"
 name     = "Indowebnovel"
-version  = "1.1.1"
+version  = "1.2.0"
 baseUrl  = "https://indowebnovel.id/"
 language = "id"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/indowebnovel.png"
@@ -27,42 +27,43 @@ local function applyStandardContentTransforms(text)
   return text
 end
 
--- ── Кэш страницы книги (fetchPage) ────────────────────────────────────────────
+-- ── Кэш страницы книги (fetchBookDoc) ──────────────────────────────────────────
 
-local _pageCache = {}
+local _bookDocCache = {}
 
-local function fetchPage(url)
-  if _pageCache[url] then return _pageCache[url] end
+local function fetchBookDoc(url)
+  if _bookDocCache[url] then return _bookDocCache[url] end
   local r = http_get(url)
-  if r.success then
-    _pageCache[url] = r.body
-    return r.body
-  end
-  return nil
+  if not r.success then return nil end
+  local doc = r:toHtml()
+  if doc then _bookDocCache[url] = doc end
+  return doc
 end
 
 -- ── Парсинг элементов каталога ────────────────────────────────────────────────
 
-local function parseCatalogItems(body)
+local function parseCatalogItems(doc)
+  if not doc then return {} end
   local items = {}
-  for _, el in ipairs(html_select(body, ".flexbox2-content")) do
-    local a = html_select_first(el.html, "a[title]")
+  for _, el in ipairs(doc:select(".flexbox2-content")) do
+    local a = el:selectFirst("a[title]")
     if a then
-      local bookUrl = absUrl(a.href)
-      local title   = a.title
+      local bookUrl = absUrl(a.href or a:attr("href"))
+      local title   = a.title or a:attr("title") or ""
       if title == "" then
-        local titleEl = html_select_first(a.html, ".flexbox2-title span:first-child")
-        if titleEl then title = titleEl.text end
+        local titleEl = a:selectFirst(".flexbox2-title span:first-child")
+        if titleEl then title = titleEl:text() end
       end
-      local cover   = html_attr(el.html, ".flexbox2-thumb img", "src")
+      local img = el:selectFirst(".flexbox2-thumb img")
+      local cover = img and (img:attr("src") or img.src) or ""
       -- рейтинг в карточке каталога: <div class="score">4.4</div>
-      local rEl = html_select_first(el.html, ".score")
+      local rEl = el:selectFirst(".score")
       if bookUrl ~= "" and title ~= "" then
         table.insert(items, {
           title  = string_clean(title),
           url    = bookUrl,
           cover  = absUrl(cover),
-          rating = rEl and string_clean(rEl.text) or nil
+          rating = rEl and string_clean(rEl:text()) or nil
         })
       end
     end
@@ -105,7 +106,8 @@ function getCatalogList(index)
   local r = http_get(url)
   if not r.success then return { items = {}, hasNext = false } end
 
-  local items = parseCatalogItems(r.body)
+  local doc = r:toHtml()
+  local items = parseCatalogItems(doc)
   return { items = items, hasNext = #items > 0 }
 end
 
@@ -123,55 +125,56 @@ function getCatalogSearch(index, query)
   local r = http_get(url)
   if not r.success then return { items = {}, hasNext = false } end
 
-  local items = parseCatalogItems(r.body)
+  local doc = r:toHtml()
+  local items = parseCatalogItems(doc)
   return { items = items, hasNext = #items > 0 }
 end
 
 -- ── Детали книги ──────────────────────────────────────────────────────────────
 
 function getBookTitle(bookUrl)
-  local body = fetchPage(bookUrl)
-  if not body then return nil end
-  local el = html_select_first(body, ".series-titlex h2")
-  if el then return string_clean(el.text) end
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  local el = doc:selectFirst(".series-titlex h2")
+  if el then return string_clean(el:text()) end
   return nil
 end
 
 function getBookCoverImageUrl(bookUrl)
-  local body = fetchPage(bookUrl)
-  if not body then return nil end
-  local el = html_select_first(body, ".series-thumb img")
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  local el = doc:selectFirst(".series-thumb img")
   if el then
-    local src = el.src
-    if src == "" then src = el:attr("data-src") end
+    local src = el.src or el:attr("src") or ""
+    if src == "" then src = el:attr("data-src") or "" end
     return absUrl(src)
   end
   return nil
 end
 
 function getBookDescription(bookUrl)
-  local body = fetchPage(bookUrl)
-  if not body then return nil end
-  local el = html_select_first(body, ".series-synops")
-  if el then return string_trim(el.text) end
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  local el = doc:selectFirst(".series-synops")
+  if el then return string_trim(el:text()) end
   return nil
 end
 
 function getBookRating(bookUrl)
-  local body = fetchPage(bookUrl)
-  if not body then return nil end
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
   -- голое число (шкала 0-5); ratingCount не трогаем — он отдаёт PHP-варнинг
-  local el = html_select_first(body, ".series-infoz span[itemprop=\"ratingValue\"]")
-  if el then return string_clean(el.text) end
+  local el = doc:selectFirst(".series-infoz span[itemprop=\"ratingValue\"]")
+  if el then return string_clean(el:text()) end
   return nil
 end
 
 function getBookGenres(bookUrl)
-  local body = fetchPage(bookUrl)
-  if not body then return {} end
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return {} end
   local genres = {}
-  for _, a in ipairs(html_select(body, ".series-genres a")) do
-    local g = string_trim(a.text)
+  for _, a in ipairs(doc:select(".series-genres a")) do
+    local g = string_trim(a:text())
     if g ~= "" then table.insert(genres, g) end
   end
   return genres
@@ -180,18 +183,18 @@ end
 -- ── Список глав ───────────────────────────────────────────────────────────────
 
 function getChapterList(bookUrl)
-  local body = fetchPage(bookUrl)
-  if not body then return {} end
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return {} end
 
   local chapters = {}
   -- реальный класс списка — .series-chapterlists (с «s»), не .series-chapterlist
-  for _, a in ipairs(html_select(body, ".series-chapterlists li a")) do
-    local chUrl = absUrl(a.href)
+  for _, a in ipairs(doc:select(".series-chapterlists li a")) do
+    local chUrl = absUrl(a.href or a:attr("href"))
     if chUrl ~= "" then
       -- заголовок в первом <span>; второй span.date — дата публикации
-      local titleEl = html_select_first(a.html, "span")
+      local titleEl = a:selectFirst("span")
       table.insert(chapters, {
-        title = titleEl and string_clean(titleEl.text) or string_clean(a.text),
+        title = titleEl and string_clean(titleEl:text()) or string_clean(a:text()),
         url   = chUrl
       })
     end
@@ -206,12 +209,17 @@ end
 -- ── Хэш для обновлений ────────────────────────────────────────────────────────
 
 function getChapterListHash(bookUrl)
-  -- ВАЖНО: прямой http_get, НЕ fetchPage!
+  -- ВАЖНО: прямой http_get, НЕ fetchBookDoc!
   local r = http_get(bookUrl)
   if not r.success then return nil end
+  local doc = r:toHtml()
+  if not doc then return nil end
   -- Берём href первой (самой новой) главы — уникален для каждого обновления
-  local el = html_select_first(r.body, ".series-chapterlists li:first-child a")
-  if el and el.href ~= "" then return el.href end
+  local el = doc:selectFirst(".series-chapterlists li:first-child a")
+  if el then
+    local href = el.href or el:attr("href") or ""
+    if href ~= "" then return href end
+  end
   return nil
 end
 
@@ -350,6 +358,7 @@ function getCatalogFiltered(index, filters)
   local r = http_get(url)
   if not r.success then return { items = {}, hasNext = false } end
 
-  local items = parseCatalogItems(r.body)
+  local doc = r:toHtml()
+  local items = parseCatalogItems(doc)
   return { items = items, hasNext = #items > 0 }
 end

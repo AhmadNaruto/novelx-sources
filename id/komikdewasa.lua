@@ -2,7 +2,7 @@
 
 id       = "komikdewasa"
 name     = "Komik Dewasa"
-version  = "1.0.1"
+version  = "1.1.0"
 baseUrl  = "https://komikdewasa.art/"
 language = "id"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/komikdewasa.png"
@@ -10,7 +10,7 @@ content_type = "manga"
 
 -- ── Хелперы ──
 
-local _pageCache = {}
+local _bookDocCache = {}
 
 local function absUrl(href)
     if not href or href == "" then return "" end
@@ -19,15 +19,14 @@ local function absUrl(href)
     return url_resolve(baseUrl, href)
 end
 
--- Страницы книги кэшируем: движок вызывает функции деталей параллельно
-local function fetchBookPage(url)
-    if _pageCache[url] then return _pageCache[url] end
+-- Страницы книги кэшируем в виде Document (OOP Shosetsu)
+local function fetchBookDoc(url)
+    if _bookDocCache[url] then return _bookDocCache[url] end
     local r = http_get(url)
-    if r.success then
-        _pageCache[url] = r.body
-        return r.body
-    end
-    return nil
+    if not r.success then return nil end
+    local doc = r:toHtml()
+    if doc then _bookDocCache[url] = doc end
+    return doc
 end
 
 -- URL книги как есть, если пустой/заканчивается на / или .html, иначе + "/".
@@ -39,26 +38,28 @@ local function normalizeBookUrl(bookUrl)
 end
 
 -- Карточка каталога: div.bsx > a > .limit img / .bigor .tt / .rt .numscore
-local function parseCards(html)
+local function parseCards(doc)
+    if not doc then return {} end
     local items = {}
-    local cards = html_select(html, "div.listupd div.bs div.bsx a[href*='/komik/']")
+    local cards = doc:select("div.listupd div.bs div.bsx a[href*='/komik/']")
     for _, card in ipairs(cards) do
-        local titleEl = html_select_first(card, ".bigor .tt")
+        local titleEl = card:selectFirst(".bigor .tt")
         local title = ""
         if titleEl then
-            title = string_clean(titleEl.text)
+            title = string_clean(titleEl:text())
         elseif card.title and card.title ~= "" then
             title = string_clean(card.title)
         end
         if title ~= "" then
-            local imgEl   = html_select_first(card, ".limit img")
-            local rEl     = html_select_first(card, ".rt .numscore")
-            local item    = { title = title, url = absUrl(card.href or "") }
-            if imgEl and imgEl.src ~= "" then
-                item.cover = absUrl(imgEl.src)
+            local imgEl   = card:selectFirst(".limit img")
+            local rEl     = card:selectFirst(".rt .numscore")
+            local item    = { title = title, url = absUrl(card.href or card:attr("href") or "") }
+            if imgEl then
+                local src = imgEl:attr("src") or imgEl.src or ""
+                if src ~= "" then item.cover = absUrl(src) end
             end
             if rEl then
-                local r = string_clean(rEl.text)
+                local r = string_clean(rEl:text())
                 if r ~= "" then item.rating = "Rating: " .. r .. "/10" end
             end
             table.insert(items, item)
@@ -79,7 +80,8 @@ function getCatalogList(index)
     local r = http_get(url)
     if not r.success then return { items = {}, hasNext = false } end
 
-    local items = parseCards(r.body)
+    local doc = r:toHtml()
+    local items = parseCards(doc)
     -- Полные страницы = 20 карточек, последняя страница = 13
     return { items = items, hasNext = #items >= 20 }
 end
@@ -94,7 +96,8 @@ function getCatalogSearch(index, query)
     local r = http_get(url)
     if not r.success then return { items = {}, hasNext = false } end
 
-    local items = parseCards(r.body)
+    local doc = r:toHtml()
+    local items = parseCards(doc)
     return { items = items, hasNext = false }
 end
 
@@ -194,7 +197,8 @@ function getCatalogFiltered(index, filters)
     local r = http_get(url)
     if not r.success then return { items = {}, hasNext = false } end
 
-    local items = parseCards(r.body)
+    local doc = r:toHtml()
+    local items = parseCards(doc)
     local hasNext = #items >= 20
     return { items = items, hasNext = hasNext }
 end
@@ -202,33 +206,35 @@ end
 -- ── Детали книги ──
 
 function getBookTitle(bookUrl)
-    local html = fetchBookPage(normalizeBookUrl(bookUrl))
-    if not html then return nil end
-    local el = html_select_first(html, "h1.entry-title")
-    return el and string_clean(el.text) or nil
+    local doc = fetchBookDoc(normalizeBookUrl(bookUrl))
+    if not doc then return nil end
+    local el = doc:selectFirst("h1.entry-title")
+    return el and string_clean(el:text()) or nil
 end
 
 function getBookCoverImageUrl(bookUrl)
-    local html = fetchBookPage(normalizeBookUrl(bookUrl))
-    if not html then return nil end
-    local el = html_select_first(html, ".thumb img")
-    return el and (el.src or "") ~= "" and absUrl(el.src) or nil
+    local doc = fetchBookDoc(normalizeBookUrl(bookUrl))
+    if not doc then return nil end
+    local el = doc:selectFirst(".thumb img")
+    if not el then return nil end
+    local src = el:attr("src") or el.src or ""
+    return src ~= "" and absUrl(src) or nil
 end
 
 function getBookDescription(bookUrl)
-    local html = fetchBookPage(normalizeBookUrl(bookUrl))
-    if not html then return nil end
-    local el = html_select_first(html, ".entry-content.entry-content-single")
-    return el and html_text(el.html) or nil
+    local doc = fetchBookDoc(normalizeBookUrl(bookUrl))
+    if not doc then return nil end
+    local el = doc:selectFirst(".entry-content.entry-content-single")
+    return el and html_text(el) or nil
 end
 
 function getBookGenres(bookUrl)
-    local html = fetchBookPage(normalizeBookUrl(bookUrl))
-    if not html then return {} end
+    local doc = fetchBookDoc(normalizeBookUrl(bookUrl))
+    if not doc then return {} end
     local genres = {}
-    local els = html_select(html, ".seriestugenre a[rel='tag']")
+    local els = doc:select(".seriestugenre a[rel='tag']")
     for _, el in ipairs(els) do
-        table.insert(genres, string_clean(el.text))
+        table.insert(genres, string_clean(el:text()))
     end
     return genres
 end
@@ -236,13 +242,13 @@ end
 -- ── Rating ──
 
 function getBookRating(bookUrl)
-    local html = fetchBookPage(normalizeBookUrl(bookUrl))
-    if not html then return nil end
+    local doc = fetchBookDoc(normalizeBookUrl(bookUrl))
+    if not doc then return nil end
     -- На странице рейтинг в div.num[itemprop='ratingValue'][content] (шкала 10)
-    local el = html_select_first(html, "[itemprop='ratingValue']")
+    local el = doc:selectFirst("[itemprop='ratingValue']")
     if not el then return nil end
-    local v = el:attr("content")
-    if not v or v == "" then v = el.text or "" end
+    local v = el:attr("content") or ""
+    if v == "" then v = el:text() or "" end
     v = string_clean(v)
     if v == "" then return nil end
     return "Rating: " .. v .. "/10"
@@ -251,25 +257,28 @@ end
 -- ── Status / Last update ──
 
 function getBookStatus(bookUrl)
-    local html = fetchBookPage(normalizeBookUrl(bookUrl))
-    if not html then return nil end
-    local rows = html_select(html, ".infotable tr")
+    local doc = fetchBookDoc(normalizeBookUrl(bookUrl))
+    if not doc then return nil end
+    local rows = doc:select(".infotable tr")
     for _, row in ipairs(rows) do
-        local cells = html_select(row, "td")
-        if #cells >= 2 and string_trim(cells[1].text) == "Status" then
-            return string_clean(cells[2].text)
+        local cells = row:select("td")
+        if #cells >= 2 and string_trim(cells[1]:text()) == "Status" then
+            return string_clean(cells[2]:text())
         end
     end
     return nil
 end
 
 function getBookLastUpdate(bookUrl)
-    local html = fetchBookPage(normalizeBookUrl(bookUrl))
-    if not html then return nil end
-    local v = html_attr(html, "time[itemprop='dateModified']", "datetime")
-    if v ~= "" then
-        -- "2026-09-18T19:47:06+07:00" → "2026-09-18"
-        return v:sub(1, 10)
+    local doc = fetchBookDoc(normalizeBookUrl(bookUrl))
+    if not doc then return nil end
+    local el = doc:selectFirst("time[itemprop='dateModified']")
+    if el then
+        local v = el:attr("datetime") or ""
+        if v ~= "" then
+            -- "2026-09-18T19:47:06+07:00" → "2026-09-18"
+            return v:sub(1, 10)
+        end
     end
     return nil
 end
@@ -277,21 +286,24 @@ end
 -- ── Список глав ──
 
 function getChapterList(bookUrl)
-    local html = fetchBookPage(normalizeBookUrl(bookUrl))
-    if not html then return {} end
+    local doc = fetchBookDoc(normalizeBookUrl(bookUrl))
+    if not doc then return {} end
 
     local chapters = {}
-    local lis = html_select(html, "div#chapterlist.eplister ul.clstyle li[data-num]")
+    local lis = doc:select("div#chapterlist.eplister ul.clstyle li[data-num]")
     for _, li in ipairs(lis) do
-        local a = html_select_first(li, ".eph-num a")
-        if a and (a.href or "") ~= "" then
-            local numEl = html_select_first(li, "span.chapternum")
-            local title = numEl and string_clean(numEl.text) or ""
-            if title == "" then title = string_clean(a.text) end
-            table.insert(chapters, {
-                title = title,
-                url   = absUrl(a.href),
-            })
+        local a = li:selectFirst(".eph-num a")
+        if a then
+            local href = a.href or a:attr("href") or ""
+            if href ~= "" then
+                local numEl = li:selectFirst("span.chapternum")
+                local title = numEl and string_clean(numEl:text()) or ""
+                if title == "" then title = string_clean(a:text()) end
+                table.insert(chapters, {
+                    title = title,
+                    url   = absUrl(href),
+                })
+            end
         end
     end
 
@@ -304,15 +316,17 @@ function getChapterList(bookUrl)
 end
 
 function getChapterListHash(bookUrl)
-    -- Прямой http_get, не fetchBookPage: кэш делает хеш неактуальным
+    -- Прямой http_get, не fetchBookDoc: кэш делает хеш неактуальным
     local r = http_get(normalizeBookUrl(bookUrl))
     if not r.success then return nil end
-    local li = html_select_first(r.body, "ul.clstyle li[data-num]")
-    if li then
-        local a = html_select_first(li, ".eph-num a")
+    local doc = r:toHtml()
+    if not doc then return nil end
+    local a = doc:selectFirst("ul.clstyle li[data-num] .eph-num a")
+    if a then
+        local href = a.href or a:attr("href") or ""
         -- Первая запись = самая новая глава
-        if a and a.href and a.href ~= "" then
-            return a.href
+        if href ~= "" then
+            return href
         end
     end
     return nil

@@ -2,7 +2,7 @@
 
 id       = "komikcast"
 name     = "Komikcast"
-version  = "1.1.1"
+version  = "1.2.0"
 baseUrl  = "https://v1.komikcast.ac/"
 language = "id"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/komikcast.webp"
@@ -10,7 +10,7 @@ content_type = "manga"
 
 -- ── Хелперы ──
 
-local _pageCache = {}
+local _bookDocCache = {}
 
 local function absUrl(href)
     if not href or href == "" then return "" end
@@ -19,14 +19,13 @@ local function absUrl(href)
     return url_resolve(baseUrl, href)
 end
 
-local function fetchBookPage(url)
-    if _pageCache[url] then return _pageCache[url] end
+local function fetchBookDoc(url)
+    if _bookDocCache[url] then return _bookDocCache[url] end
     local r = http_get(url)
-    if r.success then
-        _pageCache[url] = r.body
-        return r.body
-    end
-    return nil
+    if not r.success then return nil end
+    local doc = r:toHtml()
+    if doc then _bookDocCache[url] = doc end
+    return doc
 end
 
 local function cleanTitle(title)
@@ -56,20 +55,21 @@ function getCatalogList(index)
     local r = http_get(url)
     if not r.success then return { items = {}, hasNext = false } end
 
+    local doc = r:toHtml()
     local items = {}
-    local cards = html_select(r.body, "a[href*='/manga/']")
+    local cards = doc:select("a[href*='/manga/']")
     for _, card in ipairs(cards) do
-        local href = card.href or ""
+        local href = card.href or card:attr("href") or ""
         if href:find("/manga/[^/]+$") then
-            local titleEl = html_select_first(card, "h3")
-            local imgEl = html_select_first(card, "img")
+            local titleEl = card:selectFirst("h3")
+            local imgEl = card:selectFirst("img")
             if titleEl then
                 local cover = ""
                 if imgEl then
-                    cover = stripQuery(imgEl.src or "")
+                    cover = stripQuery(imgEl:attr("src") or imgEl.src or "")
                 end
                 table.insert(items, {
-                    title = cleanTitle(titleEl.text),
+                    title = cleanTitle(titleEl:text()),
                     url   = absUrl(href),
                     cover = cover,
                 })
@@ -221,20 +221,21 @@ function getCatalogFiltered(index, filters)
     local r = http_get(url)
     if not r.success then return { items = {}, hasNext = false } end
 
+    local doc = r:toHtml()
     local items = {}
-    local cards = html_select(r.body, "a[href*='/manga/']")
+    local cards = doc:select("a[href*='/manga/']")
     for _, card in ipairs(cards) do
-        local href = card.href or ""
+        local href = card.href or card:attr("href") or ""
         if href:find("/manga/[^/]+$") then
-            local titleEl = html_select_first(card, "h3")
-            local imgEl = html_select_first(card, "img")
+            local titleEl = card:selectFirst("h3")
+            local imgEl = card:selectFirst("img")
             if titleEl then
                 local cover = ""
                 if imgEl then
-                    cover = stripQuery(imgEl.src or "")
+                    cover = stripQuery(imgEl:attr("src") or imgEl.src or "")
                 end
                 table.insert(items, {
-                    title = cleanTitle(titleEl.text),
+                    title = cleanTitle(titleEl:text()),
                     url   = absUrl(href),
                     cover = cover,
                 })
@@ -249,40 +250,41 @@ end
 -- ── Детали книги ──
 
 function getBookTitle(bookUrl)
-    local html = fetchBookPage(bookUrl)
-    if not html then return nil end
-    local el = html_select_first(html, "h1")
-    return el and cleanTitle(el.text) or nil
+    local doc = fetchBookDoc(bookUrl)
+    if not doc then return nil end
+    local el = doc:selectFirst("h1")
+    return el and cleanTitle(el:text()) or nil
 end
 
 function getBookCoverImageUrl(bookUrl)
-    local html = fetchBookPage(bookUrl)
-    if not html then return nil end
-    local el = html_select_first(html, "aside img")
+    local doc = fetchBookDoc(bookUrl)
+    if not doc then return nil end
+    local el = doc:selectFirst("aside img")
     if el then
-        return stripQuery(el.src or "")
+        local src = el:attr("src") or el.src or ""
+        return stripQuery(src)
     end
     return nil
 end
 
 function getBookDescription(bookUrl)
-    local html = fetchBookPage(bookUrl)
-    if not html then return nil end
-    local el = html_select_first(html, "p.whitespace-pre-line")
-    return el and el.text or nil
+    local doc = fetchBookDoc(bookUrl)
+    if not doc then return nil end
+    local el = doc:selectFirst("p.whitespace-pre-line")
+    return el and el:text() or nil
 end
 
 function getBookStatus(bookUrl)
-    local html = fetchBookPage(bookUrl)
-    if not html then return nil end
+    local doc = fetchBookDoc(bookUrl)
+    if not doc then return nil end
     -- Статус в aside: "Status" → значение
-    local spans = html_select(html, "aside span")
+    local spans = doc:select("aside span")
     for i, span in ipairs(spans) do
-        if span.text == "Status" then
+        if span:text() == "Status" then
             -- Следующий span содержит значение
             local nextSpan = spans[i + 1]
             if nextSpan then
-                return nextSpan.text
+                return nextSpan:text()
             end
         end
     end
@@ -292,18 +294,18 @@ end
 -- ── Список глав ──
 
 function getChapterList(bookUrl)
-    local html = fetchBookPage(bookUrl)
-    if not html then return {} end
+    local doc = fetchBookDoc(bookUrl)
+    if not doc then return {} end
 
     local slug = extractSlug(bookUrl)
     local chapters = {}
-    local links = html_select(html, "a[href*='" .. slug .. "-chapter-']")
+    local links = doc:select("a[href*='" .. slug .. "-chapter-']")
     for _, link in ipairs(links) do
-        local href = link.href or ""
-        local titleEl = html_select_first(link, "span")
+        local href = link.href or link:attr("href") or ""
+        local titleEl = link:selectFirst("span")
         if titleEl and href ~= "" then
             table.insert(chapters, {
-                title = cleanTitle(titleEl.text),
+                title = cleanTitle(titleEl:text()),
                 url   = absUrl(href),
             })
         end
@@ -318,12 +320,15 @@ function getChapterList(bookUrl)
 end
 
 function getChapterListHash(bookUrl)
+    -- Прямой http_get, не fetchBookDoc: кэш делает хеш неактуальным
     local r = http_get(bookUrl)
     if not r.success then return nil end
 
+    local doc = r:toHtml()
+    if not doc then return nil end
     local slug = extractSlug(bookUrl)
-    local a = html_select_first(r.body, "a[href*='" .. slug .. "-chapter-']")
-    return a and a.href or nil
+    local a = doc:selectFirst("a[href*='" .. slug .. "-chapter-']")
+    return a and (a.href or a:attr("href")) or nil
 end
 
 -- ── Текст главы (manga: getChapterText → заглушка,.getPageList основной) ──

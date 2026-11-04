@@ -14,7 +14,7 @@
 
 id       = "hmanga_asia"
 name     = "HManga"
-version  = "1.2.3"
+version  = "1.3.0"
 baseUrl  = "https://hmanga.asia"
 language = "es"
 content_type = "manga"
@@ -30,18 +30,26 @@ local function absUrl(href)
     return url_resolve(baseUrl, href)
 end
 
-local _pageCache = {}
+local _bookDocCache = {}
 
-local function fetchPage(url)
-    if _pageCache[url] then return _pageCache[url] end
+local function fetchBookDoc(url)
+    if _bookDocCache[url] then return _bookDocCache[url].doc, _bookDocCache[url].html end
     local r = http_get(url)
     if not r.success then
         sleep(400)
         r = http_get(url)
     end
-    if not r.success then return nil end
-    _pageCache[url] = r.body
-    return r.body
+    if not r.success then return nil, nil end
+    local doc = r:toHtml()
+    if doc then
+        _bookDocCache[url] = { doc = doc, html = r.body }
+    end
+    return doc, r.body
+end
+
+local function fetchPage(url)
+    local doc, html = fetchBookDoc(url)
+    return html
 end
 
 -- URL real de una imagen (los temas WP cargan con lazy-load)
@@ -164,39 +172,39 @@ end
 
 local CARD_SELECTORS = { "div.card.post", ".card.post", "article", ".post" }
 
-local function parseCard(cardHtml)
-    local titleEl = html_select_first(cardHtml,
-        "a[rel='bookmark'], h2 a[href], h3 a[href], .entry-title a[href], .post-title a[href]")
+local function parseCard(card)
+    local titleEl = card:selectFirst("a[rel='bookmark'], h2 a[href], h3 a[href], .entry-title a[href], .post-title a[href]")
     local url, title = "", ""
     if titleEl then
-        url = titleEl.href or ""
-        title = string_clean(titleEl.text)
+        url = titleEl.href or titleEl:attr("href") or ""
+        title = string_clean(titleEl:text())
     end
     if url == "" then
-        local a = html_select_first(cardHtml, "a[href]")
-        if a then url = a.href or "" end
+        local a = card:selectFirst("a[href]")
+        if a then url = a.href or a:attr("href") or "" end
     end
     local cover = ""
-    local img = html_select_first(cardHtml, "img.wp-post-image")
-            or html_select_first(cardHtml, "img[data-src]")
-            or html_select_first(cardHtml, "img")
+    local img = card:selectFirst("img.wp-post-image")
+            or card:selectFirst("img[data-src]")
+            or card:selectFirst("img")
     if img then cover = absUrl(imgSrc(img)) end
     if title == "" and img then title = string_clean(img:attr("alt") or "") end
     return url, title, cover
 end
 
-local function parseCatalog(html)
+local function parseCatalog(doc)
+    if not doc then return {} end
     local items, seen = {}, {}
 
     local cards
     for _, sel in ipairs(CARD_SELECTORS) do
-        local found = html_select(html, sel)
+        local found = doc:select(sel)
         if #found >= 3 then cards = found; break end
     end
 
     if cards then
         for _, card in ipairs(cards) do
-            local url, title, cover = parseCard(card.html)
+            local url, title, cover = parseCard(card)
             url = absUrl(url)
             if isPostUrl(url) and title ~= "" and not seen[url] then
                 seen[url] = true
@@ -205,9 +213,9 @@ local function parseCatalog(html)
         end
     else
         -- Fallback: enlaces de título sueltos
-        for _, a in ipairs(html_select(html, "a[rel='bookmark'], h2 a[href], h3 a[href]")) do
-            local u = absUrl(a.href or "")
-            local t = string_clean(a.text)
+        for _, a in ipairs(doc:select("a[rel='bookmark'], h2 a[href], h3 a[href]")) do
+            local u = absUrl(a.href or a:attr("href") or "")
+            local t = string_clean(a:text())
             if isPostUrl(u) and t ~= "" and not seen[u] then
                 seen[u] = true
                 table.insert(items, { title = t, url = u, cover = "" })
@@ -222,9 +230,9 @@ function getCatalogList(index)
     local page = (index or 0) + 1
     local url = baseUrl
     if page > 1 then url = baseUrl .. "/page/" .. page .. "/" end
-    local html = fetchPage(url)
-    if not html then return { items = {}, hasNext = false } end
-    local items = parseCatalog(html)
+    local doc = fetchBookDoc(url)
+    if not doc then return { items = {}, hasNext = false } end
+    local items = parseCatalog(doc)
     return { items = items, hasNext = #items > 0 }
 end
 
@@ -237,9 +245,9 @@ function getCatalogSearch(index, query)
     else
         url = baseUrl .. "/page/" .. page .. "/?s=" .. q
     end
-    local html = fetchPage(url)
-    if not html then return { items = {}, hasNext = false } end
-    local items = parseCatalog(html)
+    local doc = fetchBookDoc(url)
+    if not doc then return { items = {}, hasNext = false } end
+    local items = parseCatalog(doc)
     return { items = items, hasNext = #items > 0 }
 end
 
@@ -300,9 +308,9 @@ function getCatalogFiltered(index, filters)
         url = string.gsub(url, "/$", "") .. "/page/" .. tostring(page) .. "/"
     end
 
-    local html = fetchPage(url)
-    if not html then return { items = {}, hasNext = false } end
-    local items = parseCatalog(html)
+    local doc = fetchBookDoc(url)
+    if not doc then return { items = {}, hasNext = false } end
+    local items = parseCatalog(doc)
     return { items = items, hasNext = #items > 0 }
 end
 
@@ -312,12 +320,21 @@ function getChapterListHash(bookUrl)
     local base = string.gsub(bookUrl or "", "#.*$", "")
     local r = http_get(base)
     if not r.success then return nil end
-    local seriesA = html_select_first(r.body, "a[href*='/series/']")
-    if seriesA and seriesA.href then
-        local sr = http_get(seriesA.href)
-        if sr.success then
-            local a = html_select_first(sr.body, "a[rel='bookmark'], h2 a[href], h3 a[href]")
-            return a and a.href or seriesA.href
+    local doc = r:toHtml()
+    if not doc then return base end
+    local seriesA = doc:selectFirst("a[href*='/series/']")
+    if seriesA then
+        local href = seriesA.href or seriesA:attr("href") or ""
+        if href ~= "" then
+            local sr = http_get(href)
+            if sr.success then
+                local sdoc = sr:toHtml()
+                if sdoc then
+                    local a = sdoc:selectFirst("a[rel='bookmark'], h2 a[href], h3 a[href]")
+                    if a then return a.href or a:attr("href") or href end
+                end
+                return href
+            end
         end
     end
     return base
@@ -327,24 +344,27 @@ function getChapterList(bookUrl)
     local base = string.gsub(bookUrl or "", "#.*$", "")
 
     -- Las series multi-capitulo tienen página /series/... con la lista
-    local html = fetchPage(base)
-    if html then
-        local seriesA = html_select_first(html, "a[href*='/series/']")
-        if seriesA and seriesA.href then
-            local sHtml = fetchPage(seriesA.href)
-            if sHtml then
-                local items = parseCatalog(sHtml)
-                if #items > 0 then
-                    -- La lista del sitio es de más nuevo a más antiguo;
-                    -- se invierte para orden de lectura
-                    local chapters = {}
-                    for i = #items, 1, -1 do
-                        table.insert(chapters, {
-                            title = items[i].title,
-                            url = items[i].url
-                        })
+    local doc = fetchBookDoc(base)
+    if doc then
+        local seriesA = doc:selectFirst("a[href*='/series/']")
+        if seriesA then
+            local href = seriesA.href or seriesA:attr("href") or ""
+            if href ~= "" then
+                local sdoc = fetchBookDoc(href)
+                if sdoc then
+                    local items = parseCatalog(sdoc)
+                    if #items > 0 then
+                        -- La lista del sitio es de más nuevo a más antiguo;
+                        -- se invierte para orden de lectura
+                        local chapters = {}
+                        for i = #items, 1, -1 do
+                            table.insert(chapters, {
+                                title = items[i].title,
+                                url = items[i].url
+                            })
+                        end
+                        return chapters
                     end
-                    return chapters
                 end
             end
         end
@@ -357,20 +377,22 @@ end
 -- ── Detalles del libro ────────────────────────────────────────────────────
 
 function getBookTitle(bookUrl)
-    local html = fetchPage(bookUrl)
-    if not html then return nil end
-    local el = html_select_first(html, "h1.entry-title, h1")
-    return el and string_clean(el.text) or nil
+    local doc = fetchBookDoc(bookUrl)
+    if not doc then return nil end
+    local el = doc:selectFirst("h1.entry-title, h1")
+    return el and string_clean(el:text()) or nil
 end
 
 function getBookCoverImageUrl(bookUrl)
-    local html = fetchPage(bookUrl)
-    if not html then return nil end
-    local cover = html_attr(html, "meta[property='og:image']", "content")
+    local doc, html = fetchBookDoc(bookUrl)
+    if not doc then return nil end
+    local el = doc:selectFirst("meta[property='og:image']")
+    local cover = el and (el:attr("content") or "") or ""
     if cover == "" then
-        cover = html_attr(html, "meta[name='twitter:image']", "content")
+        local el2 = doc:selectFirst("meta[name='twitter:image']")
+        if el2 then cover = el2:attr("content") or "" end
     end
-    if cover == "" then
+    if cover == "" and html then
         local pages = getPageList(html, bookUrl)
         if #pages > 0 then cover = pages[1] end
     end
@@ -378,22 +400,24 @@ function getBookCoverImageUrl(bookUrl)
 end
 
 function getBookDescription(bookUrl)
-    local html = fetchPage(bookUrl)
-    if not html then return nil end
-    local d = html_attr(html, "meta[name='description']", "content")
+    local doc = fetchBookDoc(bookUrl)
+    if not doc then return nil end
+    local el = doc:selectFirst("meta[name='description']")
+    local d = el and (el:attr("content") or "") or ""
     if d == "" then
-        d = html_attr(html, "meta[property='og:description']", "content")
+        local el2 = doc:selectFirst("meta[property='og:description']")
+        if el2 then d = el2:attr("content") or "" end
     end
     return d ~= "" and string_trim(d) or nil
 end
 
 function getBookGenres(bookUrl)
-    local html = fetchPage(bookUrl)
-    if not html then return {} end
+    local doc = fetchBookDoc(bookUrl)
+    if not doc then return {} end
     local genres, seen = {}, {}
-    for _, a in ipairs(html_select(html, "a[rel='tag']")) do
+    for _, a in ipairs(doc:select("a[rel='tag']")) do
         -- El texto del enlace incluye el contador: "Ahegao 2515" → "Ahegao"
-        local g = string_clean(a.text)
+        local g = string_clean(a:text())
         g = string.gsub(g, "%s*%(?%d+%)?%s*$", "")
         g = string_trim(g)
         if g ~= "" and not seen[g] then
@@ -405,13 +429,14 @@ function getBookGenres(bookUrl)
 end
 
 function getBookLastUpdate(bookUrl)
-    local html = fetchPage(bookUrl)
-    if not html then return nil end
-    local v = html_attr(html, "meta[property='og:updated_time']", "content")
-    if v == "" then v = html_attr(html, "meta[property='article:modified_time']", "content") end
-    if v == "" then v = html_attr(html, "meta[property='article:published_time']", "content") end
+    local doc = fetchBookDoc(bookUrl)
+    if not doc then return nil end
+    local meta = doc:selectFirst("meta[property='og:updated_time']")
+        or doc:selectFirst("meta[property='article:modified_time']")
+        or doc:selectFirst("meta[property='article:published_time']")
+    local v = meta and meta:attr("content") or ""
     if v == "" then
-        local t = html_select_first(html, "time[datetime]")
+        local t = doc:selectFirst("time[datetime]")
         if t then v = t:attr("datetime") or "" end
     end
     local y, m, d = string.match(v or "", "(%d%d%d%d)%-(%d%d)%-(%d%d)")

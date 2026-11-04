@@ -1,12 +1,23 @@
 -- ── Метаданные ────────────────────────────────────────────────────────────────
 id       = "baca_lightnovel"
 name     = "Baca Lightnovel"
-version  = "1.1.1"
+version  = "1.2.0"
 baseUrl  = "https://bacalightnovel.co/"
 language = "id"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/bacalightnovel.png"
 
 -- ── Хелперы ───────────────────────────────────────────────────────────────────
+
+local _bookDocCache = {}
+
+local function fetchBookDoc(url)
+  if _bookDocCache[url] then return _bookDocCache[url] end
+  local r = http_get(url)
+  if not r.success then return nil end
+  local doc = r:toHtml()
+  if doc then _bookDocCache[url] = doc end
+  return doc
+end
 
 local function absUrl(href)
   if not href or href == "" then return "" end
@@ -26,26 +37,28 @@ local function applyStandardContentTransforms(text)
   return text
 end
 
-local function parseCatalogItems(body, preferDataSrc)
+local function parseCatalogItems(doc, preferDataSrc)
+  if not doc then return {} end
   local items = {}
-  for _, card in ipairs(html_select(body, ".listupd > .maindet")) do
-    local a = html_select_first(card.html, ".mdthumb a")
+  for _, card in ipairs(doc:select(".listupd > .maindet")) do
+    local a = card:selectFirst(".mdthumb a")
     if a then
       local bookUrl = absUrl(a.href)
-      local title = html_attr(a.html, "img", "title")
-      if title == "" then title = html_attr(a.html, "img", "alt") end
+      local img = a:selectFirst("img")
+      local title = ""
+      if img then
+        title = img:attr("title")
+        if title == "" then title = img:attr("alt") end
+      end
       local cover = ""
-      if preferDataSrc then
-        cover = html_attr(a.html, "img[data-src]", "data-src")
+      if preferDataSrc and img then
+        cover = img:attr("data-src")
       end
-      if cover == "" then
-        cover = html_attr(a.html, "img[src]", "src")
+      if cover == "" and img then
+        cover = img:attr("src")
       end
-      -- рейтинг лежит вне ссылки — в соседнем блоке .mdinfodet .mdminf.
-      -- Сайт отдаёт шкалу 10 (7, 8.2, 9.0): голое число вне 0-5 приложение
-      -- отбрасывает, поэтому явно помечаем шкалу /10
-      local rEl = html_select_first(card.html, ".mdinfodet .mdminf")
-      local rating = rEl and ("Rating: " .. string_clean(rEl.text) .. "/10") or nil
+      local rEl = card:selectFirst(".mdinfodet .mdminf")
+      local rating = rEl and ("Rating: " .. string_clean(rEl:text()) .. "/10") or nil
       if bookUrl ~= "" then
         table.insert(items, {
           title  = string_clean(title),
@@ -72,7 +85,8 @@ function getCatalogList(index)
   local r = http_get(url)
   if not r.success then return { items = {}, hasNext = false } end
 
-  local items = parseCatalogItems(r.body, true)
+  local doc = r:toHtml()
+  local items = parseCatalogItems(doc, true)
   return { items = items, hasNext = #items > 0 }
 end
 
@@ -89,38 +103,37 @@ function getCatalogSearch(index, query)
   local r = http_get(url)
   if not r.success then return { items = {}, hasNext = false } end
 
-  local items = parseCatalogItems(r.body, false)
+  local doc = r:toHtml()
+  local items = parseCatalogItems(doc, false)
   return { items = items, hasNext = #items > 0 }
 end
 
 -- ── Детали книги ──────────────────────────────────────────────────────────────
 
 function getBookTitle(bookUrl)
-  local r = http_get(bookUrl)
-  if not r.success then return nil end
-  local el = html_select_first(r.body, "h1.entry-title")
-  if el then return string_clean(el.text) end
-  return nil
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  local el = doc:selectFirst("h1.entry-title")
+  return el and string_clean(el:text()) or nil
 end
 
 function getBookCoverImageUrl(bookUrl)
-  local r = http_get(bookUrl)
-  if not r.success then return nil end
-  local el = html_select_first(r.body, ".sertothumb img")
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  local el = doc:selectFirst(".sertothumb img")
   if el then
-    local src = el.src
+    local src = el:attr("src")
     if src == "" then src = el:attr("data-src") end
-    return absUrl(src)
+    return src ~= "" and absUrl(src) or nil
   end
   return nil
 end
 
 function getBookDescription(bookUrl)
-  local r = http_get(bookUrl)
-  if not r.success then return nil end
-  local el = html_select_first(r.body, ".entry-content")
-  if el then return string_trim(el.text) end
-  return nil
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  local el = doc:selectFirst(".entry-content")
+  return el and string_trim(el:text()) or nil
 end
 
 -- ── Список глав (NONE + reverseChapters) ─────────────────────────────────────
@@ -129,13 +142,16 @@ function getChapterList(bookUrl)
   local r = http_get(bookUrl)
   if not r.success then return {} end
 
+  local doc = r:toHtml()
+  if not doc then return {} end
+
   local chapters = {}
-  for _, a in ipairs(html_select(r.body, ".eplister li > a:not(.dlpdf)")) do
+  for _, a in ipairs(doc:select(".eplister li > a:not(.dlpdf)")) do
     local chUrl = absUrl(a.href)
     if chUrl ~= "" then
-      local titleEl = html_select_first(a.html, ".epl-title")
+      local titleEl = a:selectFirst(".epl-title")
       table.insert(chapters, {
-        title = titleEl and string_clean(titleEl.text) or string_clean(a.text),
+        title = titleEl and string_clean(titleEl:text()) or string_clean(a:text()),
         url   = chUrl
       })
     end
@@ -151,9 +167,9 @@ end
 function getChapterListHash(bookUrl)
   local r = http_get(bookUrl)
   if not r.success then return nil end
-  local el = html_select_first(r.body, ".epcurlast")
-  if el then return string_clean(el.text) end
-  return nil
+  local doc = r:toHtml()
+  local el = doc and doc:selectFirst(".epcurlast")
+  return el and string_clean(el:text()) or nil
 end
 
 -- ── Текст главы ───────────────────────────────────────────────────────────────
@@ -168,11 +184,11 @@ end
 -- ── Жанры книги ───────────────────────────────────────────────────────────────
 
 function getBookGenres(bookUrl)
-  local r = http_get(bookUrl)
-  if not r.success then return {} end
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return {} end
   local genres = {}
-  for _, a in ipairs(html_select(r.body, ".sertogenre a")) do
-    local g = string_trim(a.text)
+  for _, a in ipairs(doc:select(".sertogenre a")) do
+    local g = string_trim(a:text())
     if g ~= "" then table.insert(genres, g) end
   end
   return genres
@@ -181,11 +197,11 @@ end
 -- ── Рейтинг книги ──────────────────────────────────────────────────────────────
 
 function getBookRating(bookUrl)
-  local r = http_get(bookUrl)
-  if not r.success then return nil end
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
   -- строго .rating.serrate .numscore: те же классы без .serrate есть в виджетах «популярное»
-  local el = html_select_first(r.body, ".rating.serrate .numscore")
-  if el then return "Rating: " .. string_clean(el.text) .. "/10" end
+  local el = doc:selectFirst(".rating.serrate .numscore")
+  if el then return "Rating: " .. string_clean(el:text()) .. "/10" end
   return nil
 end
 

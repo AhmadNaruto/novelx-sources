@@ -3,7 +3,7 @@ name: "English"
 sources:
   - id: "asurascans"
     name: "Asura Scans"
-    version: "1.7.2"
+    version: "1.8.0"
     url: "https://raw.githubusercontent.com/HnDK0/external-sources/refs/heads/main/en/asurascans.lua"
     icon: "https://raw.githubusercontent.com/HnDK0/external-sources/refs/heads/main/icons/asurascans.webp"
     language: "en"

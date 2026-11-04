@@ -1,7 +1,7 @@
 id       = "asurascans"
 name     = "Asura Scans"
--- Version: 1.7.2
-version  = "1.7.2"
+-- Version: 1.8.0
+version  = "1.8.0"
 baseUrl  = "https://asurascans.com"
 language = "en"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/asurascans.webp"
@@ -37,22 +37,25 @@ local CHROME_HEADERS = {
     ["Accept-Language"] = "en-US,en;q=0.9",
 }
 
-local function fetch(url)
+local function fetchDoc(url)
     local r = http_get(url, { headers = CHROME_HEADERS })
-    if not r.success then return nil end
-    return r.body
+    if not r.success then return nil, nil end
+    local doc = r:toHtml()
+    return doc, r.body
 end
 
 -- Сессионный кэш страницы книги: движок вызывает 4+ detail-функции
 -- параллельно, но в рамках одного вызова повторный fetch одного и того же
 -- bookUrl не нужен.
-local _pageCache = {}
+local _bookDocCache = {}
 
-local function fetchBookPage(url)
-    if _pageCache[url] then return _pageCache[url] end
-    local body = fetch(url)
-    if body then _pageCache[url] = body end
-    return body
+local function fetchBookDoc(url)
+    if _bookDocCache[url] then return _bookDocCache[url].doc, _bookDocCache[url].body end
+    local doc, body = fetchDoc(url)
+    if doc then
+        _bookDocCache[url] = { doc = doc, body = body }
+    end
+    return doc, body
 end
 
 local function cleanChapterTitle(text)
@@ -94,29 +97,30 @@ local function parseChapterDate(text)
     return nil
 end
 
-local function parseCards(body)
+local function parseCards(doc)
+    if not doc then return {} end
     local items = {}
     local seen = {}
-    for _, card in ipairs(html_select(body, "div.series-card")) do
-        local a = html_select_first(card.html, "a[href*='/comics/']")
+    for _, card in ipairs(doc:select("div.series-card")) do
+        local a = card:selectFirst("a[href*='/comics/']")
         if a then
-            local url = absUrl(a.href)
+            local url = absUrl(a.href or a:attr("href") or "")
             if url ~= "" and not seen[url] then
                 seen[url] = true
-                local img = html_select_first(card.html, "img")
+                local img = card:selectFirst("img")
                 local cover = ""
                 if img then
-                    local src = img.src
-                    if src == "" then src = img:attr("data-src") end
+                    local src = img.src or img:attr("src") or ""
+                    if src == "" then src = img:attr("data-src") or "" end
                     cover = absUrl(src)
                 end
                 -- Clean title lives in the h3 below the cover link (verified live)
-                local h3 = html_select_first(card.html, "h3")
-                local title = h3 and string_clean(h3.text) or ""
+                local h3 = card:selectFirst("h3")
+                local title = h3 and string_clean(h3:text()) or ""
                 -- Fallback: link text with chapter/rating suffix stripped
                 -- (home-page carousels have no h3)
                 if title == "" then
-                    title = string_clean(a.text)
+                    title = string_clean(a:text())
                     title = regex_replace(title, "\\s*Chapter\\s*\\d+.*$", "")
                     title = regex_replace(title, "\\s*\\d+\\.\\d+\\s*$", "")
                     title = string_trim(title)
@@ -126,9 +130,9 @@ local function parseCards(body)
                 -- App rating parser ("x/10" → normalized 5-scale) rejects bare
                 -- numbers > 5, so always emit the explicit scale.
                 local rating = ""
-                local rspan = html_select_first(card.html, "div.absolute span")
+                local rspan = card:selectFirst("div.absolute span")
                 if rspan then
-                    local r = string_trim(rspan.text)
+                    local r = string_trim(rspan:text())
                     if tonumber(r) then rating = r .. "/10" end
                 end
                 if title ~= "" then
@@ -146,9 +150,9 @@ function getCatalogList(index)
     local page = index + 1
     local url = baseUrl .. "/browse"
     if page > 1 then url = url .. "?page=" .. tostring(page) end
-    local body = fetch(url)
-    if not body then return { items = {}, hasNext = false } end
-    local items = parseCards(body)
+    local doc = fetchDoc(url)
+    if not doc then return { items = {}, hasNext = false } end
+    local items = parseCards(doc)
     -- Past the last page the site renders an empty grid — stop paginating
     -- instead of letting the app scroll into endless empty pages.
     return { items = items, hasNext = #items > 0 }
@@ -157,46 +161,52 @@ end
 function getCatalogSearch(index, query)
     if index > 0 then return { items = {}, hasNext = false } end
     local url = baseUrl .. "/browse?search=" .. url_encode(query)
-    local body = fetch(url)
-    if not body then return { items = {}, hasNext = false } end
-    return { items = parseCards(body), hasNext = false }
+    local doc = fetchDoc(url)
+    if not doc then return { items = {}, hasNext = false } end
+    return { items = parseCards(doc), hasNext = false }
 end
 
 function getBookTitle(bookUrl)
-    local body = fetchBookPage(bookUrl)
-    if not body then return nil end
-    local h1 = html_select_first(body, "h1")
-    return h1 and string_clean(h1.text) or nil
+    local doc = fetchBookDoc(bookUrl)
+    if not doc then return nil end
+    local h1 = doc:selectFirst("h1")
+    return h1 and string_clean(h1:text()) or nil
 end
 
 function getBookCoverImageUrl(bookUrl)
-    local body = fetchBookPage(bookUrl)
-    if not body then return nil end
-    local src = html_attr(body, "img[src*='asura-images/covers/']", "src")
-    if src == "" then src = html_attr(body, "meta[property='og:image']", "content") end
+    local doc = fetchBookDoc(bookUrl)
+    if not doc then return nil end
+    local img = doc:selectFirst("img[src*='asura-images/covers/']")
+    local src = img and (img.src or img:attr("src")) or ""
+    if src == "" then
+        local meta = doc:selectFirst("meta[property='og:image']")
+        if meta then src = meta:attr("content") or "" end
+    end
     return src ~= "" and absUrl(src) or nil
 end
 
 function getBookDescription(bookUrl)
-    local body = fetchBookPage(bookUrl)
-    if not body then return nil end
-    local el = html_select_first(body,
-        ".summary__content, .summary, .description, .synopsis, .about, .series-description")
+    local doc = fetchBookDoc(bookUrl)
+    if not doc then return nil end
+    local el = doc:selectFirst(".summary__content, .summary, .description, .synopsis, .about, .series-description")
     if el then
-        local text = string_trim(html_text(el.html))
+        local text = string_trim(html_text(el))
         if text ~= "" then return text end
     end
-    local meta = html_attr(body, "meta[name='description']", "content")
-    if meta ~= "" then return string_trim(meta) end
+    local meta = doc:selectFirst("meta[name='description']")
+    if meta then
+        local content = meta:attr("content") or ""
+        if content ~= "" then return string_trim(content) end
+    end
     return nil
 end
 
 function getBookGenres(bookUrl)
-    local body = fetchBookPage(bookUrl)
-    if not body then return {} end
+    local doc = fetchBookDoc(bookUrl)
+    if not doc then return {} end
     local genres = {}
-    for _, a in ipairs(html_select(body, "a[href*='genres=']")) do
-        local t = string_clean(a.text)
+    for _, a in ipairs(doc:select("a[href*='genres=']")) do
+        local t = string_clean(a:text())
         if t ~= "" then table.insert(genres, t) end
     end
     return genres
@@ -206,10 +216,10 @@ end
 -- шкале bestRating ("9.6"/"10"). Формат "9.6/10" — рейтинговый парсер
 -- приложения нормализует её в 5-балльную ("4.8"); голое "9.6" он бы отклонил.
 function getBookRating(bookUrl)
-    local body = fetchBookPage(bookUrl)
-    if not body then return nil end
-    for _, script in ipairs(html_select(body, "script[type='application/ld+json']")) do
-        local raw = script.html
+    local doc = fetchBookDoc(bookUrl)
+    if not doc then return nil end
+    for _, script in ipairs(doc:select("script[type='application/ld+json']")) do
+        local raw = script.html or script:attr("html") or script:text()
         if raw and string.find(raw, "ComicSeries", 1, true) then
             local ok, data = pcall(json_parse, raw)
             if ok and data and data.aggregateRating then
@@ -231,11 +241,11 @@ end
 -- Статус (ongoing / completed / …) — текст span.capitalize в блоке "Status"
 -- на странице книги (div.flex.gap-3.pt-4). Значения не маппятся, отдаём как есть.
 function getBookStatus(bookUrl)
-    local body = fetchBookPage(bookUrl)
-    if not body then return nil end
-    local el = html_select_first(body, "div.flex.gap-3.pt-4 span.capitalize")
+    local doc = fetchBookDoc(bookUrl)
+    if not doc then return nil end
+    local el = doc:selectFirst("div.flex.gap-3.pt-4 span.capitalize")
     if el then
-        local t = string_clean(el.text)
+        local t = string_clean(el:text())
         if t ~= "" then return t end
     end
     return nil
@@ -246,10 +256,10 @@ end
 -- реальной странице), поэтому берём dateModified из JSON-LD. ВНИМАНИЕ: это
 -- время модификации СТРАНИЦЫ, а не время выхода последней главы.
 function getBookLastUpdate(bookUrl)
-    local body = fetchBookPage(bookUrl)
-    if not body then return nil end
-    for _, script in ipairs(html_select(body, "script[type='application/ld+json']")) do
-        local raw = script.html
+    local doc = fetchBookDoc(bookUrl)
+    if not doc then return nil end
+    for _, script in ipairs(doc:select("script[type='application/ld+json']")) do
+        local raw = script.html or script:attr("html") or script:text()
         if raw and string.find(raw, "dateModified", 1, true) then
             local ok, data = pcall(json_parse, raw)
             if ok and data and data.dateModified then
@@ -262,23 +272,25 @@ function getBookLastUpdate(bookUrl)
 end
 
 function getChapterListHash(bookUrl)
-    local body = fetch(bookUrl)
-    if not body then return nil end
-    local a = html_select_first(body, "a[href*='/chapter/']")
-    return a and a.href or nil
+    -- Прямой fetchDoc, не fetchBookDoc: кэш делает хеш неактуальным
+    local doc = fetchDoc(bookUrl)
+    if not doc then return nil end
+    local a = doc:selectFirst("a[href*='/chapter/']")
+    return a and (a.href or a:attr("href")) or nil
 end
 
 function getChapterList(bookUrl)
-    local body = fetch(bookUrl)
-    if not body then return {} end
+    local doc = fetchBookDoc(bookUrl)
+    if not doc then return {} end
     local chapters = {}
     local seen = {}
-    for _, a in ipairs(html_select(body, "a[href*='/chapter/']")) do
-        local url = absUrl(a.href)
+    for _, a in ipairs(doc:select("a[href*='/chapter/']")) do
+        local url = absUrl(a.href or a:attr("href") or "")
         if url ~= "" and not seen[url] then
             seen[url] = true
-            local uploaded = parseChapterDate(a.text)
-            local title = cleanChapterTitle(a.text)
+            local text = a:text()
+            local uploaded = parseChapterDate(text)
+            local title = cleanChapterTitle(text)
             -- The site labels the OLDEST row "First Chapter" (it is chapter 1);
             -- keep it but rename. Other nav texts never appear on comic pages
             -- (verified live: 206 unique chapter links, only "First Chapter"

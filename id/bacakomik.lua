@@ -2,7 +2,7 @@
 
 id       = "bacakomik"
 name     = "BacaKomik"
-version  = "1.0.1"
+version  = "1.1.0"
 baseUrl  = "https://bacakomik.my/"
 language = "id"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/bacakomik.png"
@@ -10,7 +10,7 @@ content_type = "manga"
 
 -- ── Хелперы ──
 
-local _pageCache = {}
+local _bookDocCache = {}
 
 local function absUrl(href)
     if not href or href == "" then return "" end
@@ -19,15 +19,13 @@ local function absUrl(href)
     return url_resolve(baseUrl, href)
 end
 
--- Страницы книги кэшируем: движок вызывает 4 функции деталей параллельно
-local function fetchBookPage(url)
-    if _pageCache[url] then return _pageCache[url] end
+local function fetchBookDoc(url)
+    if _bookDocCache[url] then return _bookDocCache[url] end
     local r = http_get(url)
-    if r.success then
-        _pageCache[url] = r.body
-        return r.body
-    end
-    return nil
+    if not r.success then return nil end
+    local doc = r:toHtml()
+    if doc then _bookDocCache[url] = doc end
+    return doc
 end
 
 -- URL книги как есть, если пустой/заканчивается на / или .html, иначе + "/"
@@ -42,26 +40,22 @@ local function extractCover(el)
     if not el then return "" end
     local lazy = el:attr("data-lazy-src") or ""
     if lazy ~= "" and not lazy:find("data:image") then return lazy end
-    local src = el:attr("src") or ""
+    local src = el:attr("src") or el.src or ""
     if src ~= "" and not src:find("data:image") then return src end
     return ""
 end
 
 -- Ищем обложку в контейнере (.limit, .thumb и т.д.)
--- Каталог: img с data-lazy-src + noscript fallback
--- Поиск: img с прямым src (без noscript)
 local function findCoverInContainer(parent)
     if not parent then return "" end
-    -- CSS-селектор: img внутри контейнера
-    local img = html_select_first(parent, "img")
+    local img = parent:selectFirst("img")
     if img then
         local cover = extractCover(img)
         if cover ~= "" then return cover end
     end
-    -- Fallback: noscript > img (когда img — только data:image placeholder)
-    local noscriptImg = html_select_first(parent, "noscript > img")
+    local noscriptImg = parent:selectFirst("noscript > img")
     if noscriptImg then
-        local src = noscriptImg:attr("src") or ""
+        local src = noscriptImg:attr("src") or noscriptImg.src or ""
         if src ~= "" and not src:find("data:image") then return src end
     end
     return ""
@@ -91,22 +85,23 @@ local GENRES = {
 }
 
 -- Карточка каталога/поиска → элемент items
-local function parseCards(html)
+local function parseCards(doc)
+    if not doc then return {} end
     local items = {}
     -- Селектор по div-контейнеру, не по <a>: сайт вкладывает блочные div (bigors, adds)
     -- внутрь <a>, а HTML-парсеры (jsoup) выносят их из <a>. div.animposx
     -- в любом парсере остаётся целостной карточкой.
-    local cards = html_select(html, "div.animepost > div.animposx")
+    local cards = doc:select("div.animepost > div.animposx")
     for _, card in ipairs(cards) do
-        local titleEl = html_select_first(card, ".tt h4")
+        local titleEl = card:selectFirst(".tt h4")
         if titleEl then
-            local linkEl = html_select_first(card, "a[itemprop='url']")
-            local limitEl = html_select_first(card, ".limit")
-            local ratingEl = html_select_first(card, ".rating i")
-            local rating = ratingEl and cleanTitle(ratingEl.text) or ""
+            local linkEl = card:selectFirst("a[itemprop='url']")
+            local limitEl = card:selectFirst(".limit")
+            local ratingEl = card:selectFirst(".rating i")
+            local rating = ratingEl and cleanTitle(ratingEl:text()) or ""
             local item = {
-                title = cleanTitle(titleEl.text),
-                url   = linkEl and absUrl(linkEl.href or "") or "",
+                title = cleanTitle(titleEl:text()),
+                url   = linkEl and absUrl(linkEl.href or linkEl:attr("href") or "") or "",
                 cover = findCoverInContainer(limitEl),
             }
             -- Рейтинг на сайте по шкале 10 (bestRating=10) → формат "Rating: X/10"
@@ -136,7 +131,8 @@ function getCatalogList(index)
     local r = http_get(url)
     if not r.success then return { items = {}, hasNext = false } end
 
-    local items = parseCards(r.body)
+    local doc = r:toHtml()
+    local items = parseCards(doc)
     return { items = items, hasNext = hasNextPage(r.body) }
 end
 
@@ -155,7 +151,8 @@ function getCatalogSearch(index, query)
     local pos = body:find("id=\"sidebar\"")
     if pos then body = body:sub(1, pos - 1) end
 
-    local items = parseCards(body)
+    local doc = html_parse(body)
+    local items = parseCards(doc)
     -- Пагинации в поиске нет
     return { items = items, hasNext = false }
 end
@@ -249,28 +246,29 @@ function getCatalogFiltered(index, filters)
     local r = http_get(url)
     if not r.success then return { items = {}, hasNext = false } end
 
-    local items = parseCards(r.body)
+    local doc = r:toHtml()
+    local items = parseCards(doc)
     return { items = items, hasNext = hasNextPage(r.body) }
 end
 
 -- ── Детали книги ──
 
 function getBookTitle(bookUrl)
-    local html = fetchBookPage(normalizeBookUrl(bookUrl))
-    if not html then return nil end
-    local el = html_select_first(html, "h1.entry-title")
+    local doc = fetchBookDoc(normalizeBookUrl(bookUrl))
+    if not doc then return nil end
+    local el = doc:selectFirst("h1.entry-title")
     if not el then return nil end
     -- На странице h1 = "Komik Nano Machine" — убираем префикс
-    return cleanTitle(el.text):gsub("^Komik%s+", "")
+    return cleanTitle(el:text()):gsub("^Komik%s+", "")
 end
 
 function getBookCoverImageUrl(bookUrl)
-    local html = fetchBookPage(normalizeBookUrl(bookUrl))
-    if not html then return nil end
+    local doc = fetchBookDoc(normalizeBookUrl(bookUrl))
+    if not doc then return nil end
     -- Ищем контейнер .thumb, затем noscript > img внутри него
-    local thumbEl = html_select_first(html, ".thumb")
-    if not thumbEl then thumbEl = html_select_first(html, ".infoanime .thumb") end
-    if not thumbEl then thumbEl = html_select_first(html, ".infoanime") end
+    local thumbEl = doc:selectFirst(".thumb")
+    if not thumbEl then thumbEl = doc:selectFirst(".infoanime .thumb") end
+    if not thumbEl then thumbEl = doc:selectFirst(".infoanime") end
     if thumbEl then
         local cover = findCoverInContainer(thumbEl)
         if cover ~= "" then return cover end
@@ -279,19 +277,19 @@ function getBookCoverImageUrl(bookUrl)
 end
 
 function getBookDescription(bookUrl)
-    local html = fetchBookPage(normalizeBookUrl(bookUrl))
-    if not html then return nil end
-    local el = html_select_first(html, ".entry-content.entry-content-single")
-    return el and html_text(el.html) or nil
+    local doc = fetchBookDoc(normalizeBookUrl(bookUrl))
+    if not doc then return nil end
+    local el = doc:selectFirst(".entry-content.entry-content-single")
+    return el and html_text(el) or nil
 end
 
 function getBookGenres(bookUrl)
-    local html = fetchBookPage(normalizeBookUrl(bookUrl))
-    if not html then return {} end
+    local doc = fetchBookDoc(normalizeBookUrl(bookUrl))
+    if not doc then return {} end
     local genres = {}
-    local els = html_select(html, "div.genre-info a")
+    local els = doc:select("div.genre-info a")
     for _, el in ipairs(els) do
-        table.insert(genres, cleanTitle(el.text))
+        table.insert(genres, cleanTitle(el:text()))
     end
     return genres
 end
@@ -299,23 +297,23 @@ end
 -- ── Rating ──
 
 function getBookRating(bookUrl)
-    local html = fetchBookPage(normalizeBookUrl(bookUrl))
-    if not html then return nil end
-    local el = html_select_first(html, "i[itemprop='ratingValue']")
+    local doc = fetchBookDoc(normalizeBookUrl(bookUrl))
+    if not doc then return nil end
+    local el = doc:selectFirst("i[itemprop='ratingValue']")
     if not el then return nil end
     -- Рейтинг по шкале 10 (bestRating=10) → "Rating: X/10": приложение
     -- нормализует в 0..5 (X/2); число >5 приложение клампит до 5
-    return "Rating: " .. cleanTitle(el.text) .. "/10"
+    return "Rating: " .. cleanTitle(el:text()) .. "/10"
 end
 
 -- ── Status / Last update ──
 
 function getBookStatus(bookUrl)
-    local html = fetchBookPage(normalizeBookUrl(bookUrl))
-    if not html then return nil end
-    local spans = html_select(html, ".infox .spe span")
+    local doc = fetchBookDoc(normalizeBookUrl(bookUrl))
+    if not doc then return nil end
+    local spans = doc:select(".infox .spe span")
     for _, span in ipairs(spans) do
-        local text = span.text or ""
+        local text = span:text() or ""
         if text:find("Status:") then
             -- "Status: Berjalan" → "Berjalan"
             return cleanTitle(text:gsub("^.*Status:%s*", ""))
@@ -325,12 +323,15 @@ function getBookStatus(bookUrl)
 end
 
 function getBookLastUpdate(bookUrl)
-    local html = fetchBookPage(normalizeBookUrl(bookUrl))
-    if not html then return nil end
-    local content = html_attr(html, "meta[property='article:modified_time']", "content")
-    if content ~= "" then
-        -- "2026-09-17T07:13:35+00:00" → "2026-09-17"
-        return content:sub(1, 10)
+    local doc = fetchBookDoc(normalizeBookUrl(bookUrl))
+    if not doc then return nil end
+    local el = doc:selectFirst("meta[property='article:modified_time']")
+    if el then
+        local content = el:attr("content") or ""
+        if content ~= "" then
+            -- "2026-09-17T07:13:35+00:00" → "2026-09-17"
+            return content:sub(1, 10)
+        end
     end
     return nil
 end
@@ -338,16 +339,16 @@ end
 -- ── Список глав ──
 
 function getChapterList(bookUrl)
-    local html = fetchBookPage(normalizeBookUrl(bookUrl))
-    if not html then return {} end
+    local doc = fetchBookDoc(normalizeBookUrl(bookUrl))
+    if not doc then return {} end
 
     local chapters = {}
-    local links = html_select(html, "#chapter_list span.lchx a")
+    local links = doc:select("#chapter_list span.lchx a")
     for _, link in ipairs(links) do
-        local href = link.href or ""
+        local href = link.href or link:attr("href") or ""
         if href ~= "" then
             table.insert(chapters, {
-                title = cleanTitle(link.text),
+                title = cleanTitle(link:text()),
                 url   = absUrl(href),
             })
         end
@@ -362,10 +363,12 @@ function getChapterList(bookUrl)
 end
 
 function getChapterListHash(bookUrl)
-    -- Прямой http_get, не fetchBookPage: кэш делает хеш неактуальным
+    -- Прямой http_get, не fetchBookDoc: кэш делает хеш неактуальным
     local r = http_get(normalizeBookUrl(bookUrl))
     if not r.success then return nil end
-    local link = html_select_first(r.body, "#chapter_list span.lchx a")
+    local doc = r:toHtml()
+    if not doc then return nil end
+    local link = doc:selectFirst("#chapter_list span.lchx a")
     if link and link.href and link.href ~= "" then
         return link.href
     end
