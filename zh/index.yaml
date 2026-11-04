@@ -15,7 +15,7 @@ sources:
     language: "zh"
   - id: "novel543"
     name: "Novel543"
-    version: "1.0.6"
+    version: "1.1.0"
     url: "https://raw.githubusercontent.com/HnDK0/external-sources/refs/heads/main/zh/novel543.lua"
     icon: "https://raw.githubusercontent.com/HnDK0/external-sources/refs/heads/main/icons/novel543.png"
     language: "zh"

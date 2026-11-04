@@ -1,7 +1,7 @@
 -- ── Метаданные ───────────────────────────────────────────────────────────────
 id       = "syosetu"
 name     = "Syosetu"
-version  = "1.1.0"
+version  = "1.2.0"
 baseUrl  = "https://ncode.syosetu.com/"
 language = "ja"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/narou.png"
@@ -11,11 +11,29 @@ local HEADERS = {
 }
 
 -- ── Хелперы ──────────────────────────────────────────────────────────────────
+local _pageCache = {}
+local function fetchPage(url)
+    if _pageCache[url] then return _pageCache[url] end
+    local r = http_get(url, { headers = HEADERS })
+    if r.success then _pageCache[url] = r.body end
+    return r.success and r.body or nil
+end
+
 local function absUrl(href)
     if not href or href == "" then return "" end
     if href:sub(1, 4) == "http" then return href end
     if href:sub(1, 2) == "//"   then return "https:" .. href end
     return url_resolve("https://ncode.syosetu.com/", href)
+end
+
+local function applyStandardContentTransforms(text)
+    if not text or text == "" then return "" end
+    text = string_normalize(text)
+    local domain = baseUrl:gsub("https?://", ""):gsub("^www%.", ""):gsub("/+$", "")
+    text = regex_replace(text, "(?i)" .. domain .. ".*?\\n", "")
+    text = regex_replace(text, "(?i)\\A[\\s\\p{Z}\\uFEFF]*((第\\s*\\d+[話章]|Chapter\\s+\\d+)[^\\n\\r]*[\\n\\r\\s]*)+", "")
+    text = string_trim(text)
+    return text
 end
 
 -- ── Каталог (Ранкинг) ────────────────────────────────────────────────────────
@@ -43,13 +61,15 @@ function getCatalogFiltered(index, filters)
     local r = http_get(url, { headers = HEADERS })
     if not r.success then return { items = {}, hasNext = false } end
 
+    local doc = html_parse(r.body)
     local items = {}
-    for _, container in ipairs(html_select(r.body, ".p-ranklist-item")) do
-        local a = html_select_first(container.html, ".p-ranklist-item__title a")
-        if a and a.href then
-            local novelUrl = absUrl(a.href)
+    for _, container in ipairs(doc:select(".p-ranklist-item")) do
+        local a = container:selectFirst(".p-ranklist-item__title a")
+        if a then
+            local href = a:attr("href")
+            local novelUrl = absUrl(href)
             if novelUrl:match("/n[%w]+/?$") then
-                table.insert(items, { title = string_trim(a.text), url = novelUrl, cover = "" })
+                table.insert(items, { title = string_trim(a:text()), url = novelUrl, cover = "" })
             end
         end
     end
@@ -100,9 +120,9 @@ end
 
 -- ── Детали книги ─────────────────────────────────────────────────────────────
 function getBookTitle(bookUrl)
-    local r = http_get(bookUrl, { headers = HEADERS })
-    if not r.success then return nil end
-    local el = html_select_first(r.body, ".p-novel__title")
+    local body = fetchPage(bookUrl)
+    if not body then return nil end
+    local el = html_select_first(body, ".p-novel__title")
     return el and string_trim(el.text) or nil
 end
 
@@ -111,11 +131,11 @@ function getBookCoverImageUrl(bookUrl)
 end
 
 function getBookDescription(bookUrl)
-    local r = http_get(bookUrl, { headers = HEADERS })
-    if not r.success then return nil end
-    local el = html_select_first(r.body, "#novel_ex")
+    local body = fetchPage(bookUrl)
+    if not body then return nil end
+    local el = html_select_first(body, "#novel_ex")
     if el and string_trim(el.text) ~= "" then return string_trim(el.text) end
-    el = html_select_first(r.body, ".p-novel__summary")
+    el = html_select_first(body, ".p-novel__summary")
     return el and string_trim(el.text) or nil
 end
 
@@ -192,10 +212,7 @@ function getChapterText(html, url)
     local el = html_select_first(cleaned, ".p-novel__body")
     if not el then return "" end
     
-    local text = html_text(el.html)
-    text = string_normalize(text)
-    text = string_trim(text)
-    return text
+    return applyStandardContentTransforms(html_text(el.html))
 end
 
 -- ── Фильтры ──────────────────────────────────────────────────────────────────

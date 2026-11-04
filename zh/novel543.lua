@@ -186,7 +186,7 @@
 -- collides with this one because sources resolve by baseUrl.
 id       = "novel543"
 name     = "Novel543"
-version  = "1.0.6"
+version  = "1.1.0"
 baseUrl  = "https://www.novel543.com/"
 language = "zh"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/novel543.png"
@@ -1490,8 +1490,16 @@ end
 -- Primary removal is structural (div:has(p:contains(溫馨提示)) in extractPage);
 -- this text-level pass is a safety net for when the wrapper markup changes
 -- but the notice wording stays. Runs to the notice's closing "!".
-local function stripSiteNotice(text)
-  return regex_replace(text, "溫馨提示[:：]?\\s*iphone[^!]{0,400}!\\s*", "")
+local function applyStandardContentTransforms(text)
+  if not text or text == "" then return "" end
+  text = string_normalize(text)
+  local domain = baseUrl:gsub("https?://", ""):gsub("^www%.", ""):gsub("/+$", "")
+  text = regex_replace(text, "(?i)" .. domain .. ".*?\\n", "")
+  text = regex_replace(text, "(?i)\\A[\\s\\p{Z}\\uFEFF]*((第[\\d〇零一二三四五六七八九十百千两]+[章节卷回部集篇]|Chapter\\s+\\d+)[^\\n\\r]*[\\n\\r\\s]*)+", "")
+  text = regex_replace(text, "(?im)^\\s*(翻譯|譯者|編輯|校對|翻译|译者|编辑|校对|更新|閱讀|最新閱讀)[:\\s：][^\\n\\r]{0,70}(\\r?\\n|$)", "")
+  text = regex_replace(text, "溫馨提示[:：]?\\s*iphone[^!]{0,400}!\\s*", "")
+  text = string_trim(text)
+  return text
 end
 
 local function extractChapterText(pageHtml, chapterFile)
@@ -1535,8 +1543,7 @@ local function extractChapterText(pageHtml, chapterFile)
   end
 
   local text = string_trim(table.concat(parts, "\n\n"))
-  text = string_trim(stripSiteNotice(text))
-  return text
+  return applyStandardContentTransforms(text)
 end
 
 -- Footer appended to booklist sampler chapters so the reader knows how to
