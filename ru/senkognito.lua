@@ -1,6 +1,6 @@
 id       = "senkognito"
 name     = "Senkognito"
-version  = "1.0.3"
+version  = "1.0.4"
 baseUrl  = "https://senkognito.com/"
 language = "ru"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/senkognito.png"
@@ -600,13 +600,24 @@ end
 
 function getChapterListHash(bookUrl)
     local slug = bookSlug(bookUrl)
-    if not slug then return "" end
+    if not slug then return nil end
 
-    local chapters = fetchChapters(slug)
-    if #chapters == 0 then return "" end
+    local detail = fetchMangaDetail(slug)
+    if not detail then return nil end
 
-    local latest = chapters[#chapters]
-    return baseUrl .. "manga/" .. slug .. "/chapters/" .. (latest.slug or latest.id)
+    local branchId = findRUBranch(detail.branches)
+    if not branchId then return nil end
+
+    local q = string.format(
+        '{ mangaChapters(branchId: "%s", orderBy: { field: NUMBER, direction: DESC }, first: 1) { edges { node { id slug number } } } }',
+        branchId)
+    local d = gql(q)
+    if not d or not d.data or not d.data.mangaChapters or not d.data.mangaChapters.edges then return nil end
+    local edges = d.data.mangaChapters.edges
+    if #edges == 0 then return nil end
+
+    local node = edges[1].node
+    return baseUrl .. "manga/" .. slug .. "/chapters/" .. (node.slug or node.id)
 end
 
 local _chapterPagesCache = {}

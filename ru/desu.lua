@@ -1,6 +1,6 @@
 id       = "desu"
 name     = "Desu"
-version  = "1.1.3"
+version  = "1.1.4"
 baseUrl  = "https://desu.uno/"
 language = "ru"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/desu.png"
@@ -476,15 +476,15 @@ end
 
 function getChapterListHash(bookUrl)
     local id = mangaId(bookUrl)
-    if not id then return "" end
+    if not id then return nil end
     local body = fetch(baseUrl .. "api/manga/" .. id .. "/chapters")
-    if not body then return "" end
+    if not body then return nil end
     local ok, data = pcall(json_parse, body)
     if not ok or not data or not data.chapters or #data.chapters == 0 then
-        return ""
+        return nil
     end
     -- Новейшая глава в API всегда первая.
-    return data.chapters[1].view_url or ""
+    return data.chapters[1].view_url or nil
 end
 
 -- ── Текст главы (страницы изображений) ──
