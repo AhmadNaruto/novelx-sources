@@ -1,10 +1,24 @@
 -- ── Метаданные ────────────────────────────────────────────────────────────────
 id       = "bookhamster"
 name     = "Bookhamster"
-version  = "1.2.0"
+version  = "1.3.0"
 baseUrl  = "https://bookhamster.ru/"
 language = "ru"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/bookhamster.png"
+
+-- ── Session Document Cache ───────────────────────────────────────────────────
+local _bookDocCache = {}
+
+local function fetchBookDoc(url)
+  if _bookDocCache[url] then return _bookDocCache[url] end
+  local r = http_get(url)
+  if r.success then
+    local doc = r:toHtml()
+    _bookDocCache[url] = doc
+    return doc
+  end
+  return nil
+end
 
 -- ── Хелперы ───────────────────────────────────────────────────────────────────
 
@@ -25,20 +39,6 @@ local function applyStandardContentTransforms(text)
   text = regex_replace(text, "(?im)^\\s*(Translator|Editor|Proofreader|Read\\s+(at|on|latest))[:\\s][^\\n\\r]{0,70}(\\r?\\n|$)", "")
   text = string_trim(text)
   return text
-end
-
--- Кэш страницы книги: 4 функции деталей вызываются движком параллельно,
--- общий fetchPage убирает дублирующие HTTP-запросы.
-local _pageCache = {}
-
-local function fetchPage(url)
-  if _pageCache[url] then return _pageCache[url] end
-  local r = http_get(url)
-  if r.success then
-    _pageCache[url] = r.body
-    return r.body
-  end
-  return nil
 end
 
 -- Месяцы на русском → номер для формата YYYY-MM-DD
@@ -77,7 +77,24 @@ local function parseBookDate(s)
   return nil
 end
 
-
+local function parseCards(doc)
+  local items = {}
+  for _, card in ipairs(doc:select("div.one-book-home")) do
+    local titleEl = card:selectFirst("div.title-home a")
+    local linkEl  = card:selectFirst("div.img-home > a")
+    local imgEl   = card:selectFirst("div.img-home > a > img")
+    local bookUrl = linkEl and absUrl(linkEl:attr("href")) or ""
+    local cover   = imgEl and absUrl(imgEl:attr("src")) or ""
+    if titleEl and bookUrl ~= "" then
+      table.insert(items, {
+        title = string_clean(titleEl:text()),
+        url   = bookUrl,
+        cover = cover
+      })
+    end
+  end
+  return items
+end
 
 -- ── Каталог ───────────────────────────────────────────────────────────────────
 
@@ -87,20 +104,8 @@ function getCatalogList(index)
 
   local r = http_get(url)
   if not r.success then return { items = {}, hasNext = false } end
-
-  local items = {}
-  for _, card in ipairs(html_select(r.body, "div.one-book-home")) do
-    local titleEl = html_select_first(card.html, "div.title-home a")
-    local bookUrl = absUrl(html_attr(card.html, "div.img-home > a", "href"))
-    local cover   = absUrl(html_attr(card.html, "div.img-home > a > img", "src"))
-    if titleEl and bookUrl ~= "" then
-      table.insert(items, {
-        title = string_clean(titleEl.text),
-        url   = bookUrl,
-        cover = cover
-      })
-    end
-  end
+  local doc = r:toHtml()
+  local items = parseCards(doc)
 
   return { items = items, hasNext = #items > 0 }
 end
@@ -112,20 +117,8 @@ function getCatalogSearch(index, query)
 
   local r = http_get(url)
   if not r.success then return { items = {}, hasNext = false } end
-
-  local items = {}
-  for _, card in ipairs(html_select(r.body, "div.one-book-home")) do
-    local titleEl = html_select_first(card.html, "div.title-home a")
-    local bookUrl = absUrl(html_attr(card.html, "div.img-home > a", "href"))
-    local cover   = absUrl(html_attr(card.html, "div.img-home > a > img", "src"))
-    if titleEl and bookUrl ~= "" then
-      table.insert(items, {
-        title = string_clean(titleEl.text),
-        url   = bookUrl,
-        cover = cover
-      })
-    end
-  end
+  local doc = r:toHtml()
+  local items = parseCards(doc)
 
   return { items = items, hasNext = #items > 0 }
 end
@@ -133,48 +126,46 @@ end
 -- ── Детали книги ──────────────────────────────────────────────────────────────
 
 function getBookTitle(bookUrl)
-  local html = fetchPage(bookUrl)
-  if not html then return nil end
-  local el = html_select_first(html, "h1.entry-title")
-  if el then return string_clean(el.text) end
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  local el = doc:selectFirst("h1.entry-title")
+  if el then return string_clean(el:text()) end
   return nil
 end
 
 function getBookCoverImageUrl(bookUrl)
-  local html = fetchPage(bookUrl)
-  if not html then return nil end
-  local el = html_select_first(html, "div.img-ranobe > img")
-  if el then return absUrl(el.src) end
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  local el = doc:selectFirst("div.img-ranobe > img")
+  if el then return absUrl(el:attr("src")) end
   return nil
 end
 
 function getBookDescription(bookUrl)
-  local html = fetchPage(bookUrl)
-  if not html then return nil end
-  local desc = html_attr(html, "meta[name=description]", "content")
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  local meta = doc:selectFirst("meta[name=description]")
+  local desc = meta and meta:attr("content") or ""
   if desc ~= "" then return string_trim(desc) end
   return nil
 end
 
 function getBookGenres(bookUrl)
-  local html = fetchPage(bookUrl)
-  if not html then return {} end
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return {} end
 
   local genres = {}
-  -- bookhamster: div.data-ranobe содержит span.dashicons-book (без book-alt),
-  -- значения жанров находятся в div.data-value внутри того же блока
-  for _, block in ipairs(html_select(html, "div.data-ranobe")) do
-    local icon = html_select_first(block.html, "span[class*=dashicons-book]:not([class*=book-alt])")
+  for _, block in ipairs(doc:select("div.data-ranobe")) do
+    local icon = block:selectFirst("span[class*=dashicons-book]:not([class*=book-alt])")
     if icon then
-      local valueEl = html_select_first(block.html, "div.data-value")
+      local valueEl = block:selectFirst("div.data-value")
       if valueEl then
-        for _, a in ipairs(html_select(valueEl.html, "a")) do
-          local label = string_trim(a.text)
+        for _, a in ipairs(valueEl:select("a")) do
+          local label = string_trim(a:text())
           if label ~= "" then table.insert(genres, label) end
         end
-        -- если жанры без ссылок — берём весь текст
         if #genres == 0 then
-          local label = string_trim(valueEl.text)
+          local label = string_trim(valueEl:text())
           if label ~= "" then table.insert(genres, label) end
         end
       end
@@ -182,10 +173,9 @@ function getBookGenres(bookUrl)
     end
   end
 
-  -- bookhamster: альтернативный селектор через genreslist
   if #genres == 0 then
-    for _, a in ipairs(html_select(html, "div.genreslist a")) do
-      local label = string_trim(a.text)
+    for _, a in ipairs(doc:select("div.genreslist a")) do
+      local label = string_trim(a:text())
       if label ~= "" then table.insert(genres, label) end
     end
   end
@@ -196,14 +186,13 @@ end
 -- ── Статус и дата обновления ──────────────────────────────────────────────────
 
 function getBookStatus(bookUrl)
-  local html = fetchPage(bookUrl)
-  if not html then return nil end
-  -- статус книги — блок data-ranobe с иконкой dashicons-megaphone (<b>Статус книги</b>)
-  for _, block in ipairs(html_select(html, "div.data-ranobe")) do
-    if html_select_first(block.html, "span.dashicons-megaphone") then
-      local val = html_select_first(block.html, "div.data-value")
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  for _, block in ipairs(doc:select("div.data-ranobe")) do
+    if block:selectFirst("span.dashicons-megaphone") then
+      local val = block:selectFirst("div.data-value")
       if val then
-        local s = string_clean(val.text)
+        local s = string_clean(val:text())
         if s ~= "" then return s end
       end
       break
@@ -213,31 +202,29 @@ function getBookStatus(bookUrl)
 end
 
 function getBookLastUpdate(bookUrl)
-  local html = fetchPage(bookUrl)
-  if not html then return nil end
-  -- список глав отсортирован от новых к старым: дата последней главы —
-  -- это первый .li-ranobe, берём его .li-col2-ranobe
-  local first = html_select_first(html, ".li-ranobe")
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  local first = doc:selectFirst(".li-ranobe")
   if not first then return nil end
-  local dateEl = html_select_first(first.html, ".li-col2-ranobe")
+  local dateEl = first:selectFirst(".li-col2-ranobe")
   if not dateEl then return nil end
-  return parseBookDate(string_trim(dateEl.text))
+  return parseBookDate(string_trim(dateEl:text()))
 end
 
 -- ── Список глав ───────────────────────────────────────────────────────────────
 
 function getChapterList(bookUrl)
-  local r = http_get(bookUrl)
-  if not r.success then return {} end
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return {} end
 
   local chapters = {}
-  for _, li in ipairs(html_select(r.body, ".li-ranobe")) do
-    local a = html_select_first(li.html, ".li-col1-ranobe a")
+  for _, li in ipairs(doc:select(".li-ranobe")) do
+    local a = li:selectFirst(".li-col1-ranobe a")
     if a then
-      local chUrl = absUrl(a.href)
+      local chUrl = absUrl(a:attr("href"))
       if chUrl ~= "" then
         table.insert(chapters, {
-          title = string_clean(a.text),
+          title = string_clean(a:text()),
           url   = chUrl
         })
       end
@@ -252,10 +239,10 @@ end
 -- ── Хэш для обновлений ────────────────────────────────────────────────────────
 
 function getChapterListHash(bookUrl)
-  local r = http_get(bookUrl)
-  if not r.success then return nil end
-  local el = html_select_first(r.body, ".data-value")
-  if el then return string_clean(el.text) end
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  local el = doc:selectFirst(".data-value")
+  if el then return string_clean(el:text()) end
   return nil
 end
 
@@ -379,20 +366,8 @@ function getCatalogFiltered(index, filters)
 
   local r = http_get(url)
   if not r.success then return { items = {}, hasNext = false } end
-
-  local items = {}
-  for _, card in ipairs(html_select(r.body, "div.one-book-home")) do
-    local titleEl = html_select_first(card.html, "div.title-home a")
-    local bookUrl = absUrl(html_attr(card.html, "div.img-home > a", "href"))
-    local cover   = absUrl(html_attr(card.html, "div.img-home > a > img", "src"))
-    if titleEl and bookUrl ~= "" then
-      table.insert(items, {
-        title = string_clean(titleEl.text),
-        url   = bookUrl,
-        cover = cover
-      })
-    end
-  end
+  local doc = r:toHtml()
+  local items = parseCards(doc)
 
   return { items = items, hasNext = #items > 0 }
 end

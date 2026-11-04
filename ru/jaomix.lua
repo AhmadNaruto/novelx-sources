@@ -1,7 +1,7 @@
 -- ── Метаданные ────────────────────────────────────────────────────────────────
 id       = "jaomix"
 name     = "Jaomix"
-version  = "1.0.5"
+version  = "1.1.0"
 baseUrl  = "https://jaomix.ru/"
 language = "ru"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/jaomix.png"
@@ -20,16 +20,17 @@ local function transformCover(url)
   return regex_replace(url, "-150x150", "")
 end
 
--- Кэш страниц книги: 4 функции деталей вызываются движком параллельно,
+-- Кэш страниц книги: функции деталей вызываются движком параллельно,
 -- общий кэш убирает дублирующие HTTP-запросы к одному и тому же bookUrl.
-local _pageCache = {}
+local _bookDocCache = {}
 
-local function fetchPage(url)
-  if _pageCache[url] then return _pageCache[url] end
+local function fetchBookDoc(url)
+  if _bookDocCache[url] then return _bookDocCache[url] end
   local r = http_get(url)
   if r.success then
-    _pageCache[url] = r.body
-    return r.body
+    local doc = r:toHtml()
+    _bookDocCache[url] = doc
+    return doc
   end
   return nil
 end
@@ -93,6 +94,26 @@ local AJAX_HEADERS = {
   }
 }
 
+local function parseCards(doc)
+  if not doc then return {} end
+  local items = {}
+  for _, card in ipairs(doc:select("div.block-home > div.one")) do
+    local titleEl = card:selectFirst("div.title-home")
+    local aEl = card:selectFirst("div.img-home > a")
+    local imgEl = card:selectFirst("div.img-home > a > img")
+    local bookUrl = aEl and absUrl(aEl:attr("href")) or ""
+    local cover   = imgEl and transformCover(absUrl(imgEl:attr("src"))) or ""
+    if titleEl and bookUrl ~= "" then
+      table.insert(items, {
+        title = string_clean(titleEl:text()),
+        url   = bookUrl,
+        cover = cover
+      })
+    end
+  end
+  return items
+end
+
 -- ── Каталог ───────────────────────────────────────────────────────────────────
 
 function getCatalogList(index)
@@ -106,20 +127,7 @@ function getCatalogList(index)
   local r = http_get(url)
   if not r.success then return { items = {}, hasNext = false } end
 
-  local items = {}
-  for _, card in ipairs(html_select(r.body, "div.block-home > div.one")) do
-    local titleEl = html_select_first(card.html, "div.title-home")
-    local bookUrl = absUrl(html_attr(card.html, "div.img-home > a", "href"))
-    local cover   = transformCover(absUrl(html_attr(card.html, "div.img-home > a > img", "src")))
-    if titleEl and bookUrl ~= "" then
-      table.insert(items, {
-        title = string_clean(titleEl.text),
-        url   = bookUrl,
-        cover = cover
-      })
-    end
-  end
-
+  local items = parseCards(r:toHtml())
   return { items = items, hasNext = #items > 0 }
 end
 
@@ -136,56 +144,46 @@ function getCatalogSearch(index, query)
   local r = http_get(url)
   if not r.success then return { items = {}, hasNext = false } end
 
-  local items = {}
-  for _, card in ipairs(html_select(r.body, "div.block-home > div.one")) do
-    local titleEl = html_select_first(card.html, "div.title-home")
-    local bookUrl = absUrl(html_attr(card.html, "div.img-home > a", "href"))
-    local cover   = transformCover(absUrl(html_attr(card.html, "div.img-home > a > img", "src")))
-    if titleEl and bookUrl ~= "" then
-      table.insert(items, {
-        title = string_clean(titleEl.text),
-        url   = bookUrl,
-        cover = cover
-      })
-    end
-  end
-
+  local items = parseCards(r:toHtml())
   return { items = items, hasNext = #items > 0 }
 end
 
 -- ── Детали книги ──────────────────────────────────────────────────────────────
 
 function getBookTitle(bookUrl)
-  local html = fetchPage(bookUrl)
-  if not html then return nil end
-  local el = html_select_first(html, "h1")
-  if el then return string_clean(el.text) end
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  local el = doc:selectFirst("h1")
+  if el then return string_clean(el:text()) end
   return nil
 end
 
 function getBookCoverImageUrl(bookUrl)
-  local html = fetchPage(bookUrl)
-  if not html then return nil end
-  local el = html_select_first(html, "div.img-book > img")
-  if el then return transformCover(absUrl(el.src)) end
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  local el = doc:selectFirst("div.img-book > img")
+  if el then
+    local src = el:attr("src")
+    if src and src ~= "" then return transformCover(absUrl(src)) end
+  end
   return nil
 end
 
 function getBookDescription(bookUrl)
-  local html = fetchPage(bookUrl)
-  if not html then return nil end
-  local el = html_select_first(html, "#desc-tab")
-  if el then return string_trim(el.text) end
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  local el = doc:selectFirst("#desc-tab")
+  if el then return string_trim(el:text()) end
   return nil
 end
 
 function getBookGenres(bookUrl)
-  local html = fetchPage(bookUrl)
-  if not html then return {} end
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return {} end
 
   local genres = {}
-  for _, p in ipairs(html_select(html, "#info-book > p")) do
-    local text = string_trim(p.text)
+  for _, p in ipairs(doc:select("#info-book > p")) do
+    local text = string_trim(p:text())
     if string_starts_with(text, "Жанры:") then
       local raw = text:gsub("^Жанры:%s*", "")
       for genre in raw:gmatch("[^,]+") do
@@ -208,11 +206,11 @@ end
 function getBookStatus(bookUrl)
   -- Статус — текст <p> внутри #info-book, начинающийся с «Статус:»
   -- (напр. «Статус: Перевод продолжается»). Проверено на живом сайте.
-  local html = fetchPage(bookUrl)
-  if not html then return nil end
-  local ps = html_select(html, "#info-book p")
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  local ps = doc:select("#info-book p")
   for _, p in ipairs(ps) do
-    local v = string.match(p.text, "Статус:%s*(.+)")
+    local v = string.match(p:text(), "Статус:%s*(.+)")
     if v then
       v = string_trim(v)
       if v ~= "" then return v end
@@ -227,19 +225,19 @@ end
 -- Возвращаем YYYY-MM-DD либо nil.
 
 function getBookLastUpdate(bookUrl)
-  local html = fetchPage(bookUrl)
-  if not html then return nil end
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
   -- Текущий формат: блок .date-home (относит./абсолютная дата обновления,
   -- напр. «обновлена 53 минуты назад»). Проверено на живом сайте.
-  local dh = html_select_first(html, ".date-home div") or html_select_first(html, ".date-home")
+  local dh = doc:selectFirst(".date-home div, .date-home")
   if dh then
-    local res = parseJaomixDate(string_trim(dh.text))
+    local res = parseJaomixDate(string_trim(dh:text()))
     if res then return res end
   end
   -- Запасной вариант: список глав, самая свежая — первая .timechapter
-  local spans = html_select(html, ".timechapter")
+  local spans = doc:select(".timechapter")
   if #spans > 0 then
-    local res = parseJaomixDate(string_trim(spans[1].text))
+    local res = parseJaomixDate(string_trim(spans:first():text()))
     if res then return res end
   end
   return nil
@@ -248,13 +246,10 @@ end
 -- ── Количество AJAX-страниц ───────────────────────────────────────────────────
 
 local function getTotalPages(bookUrl)
-  local r = http_get(bookUrl)
-  if not r.success then return 1 end
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return 1 end
 
-  local opts = html_select(r.body, "select.sel-toc option")
-  if #opts == 0 then
-    opts = html_select(r.body, "select[onchange*='loadChaptList'] option")
-  end
+  local opts = doc:select("select.sel-toc option, select[onchange*='loadChaptList'] option")
   if #opts > 0 then return #opts end
   return 1
 end
@@ -275,12 +270,13 @@ local function fetchAjaxPage(bookUrl, page)
   if not pr.success then return {} end
 
   local chapters = {}
-  for _, a in ipairs(html_select(pr.body, "div.title a[href]")) do
-    local chUrl = absUrl(a.href)
+  local doc = pr:toHtml()
+  for _, a in ipairs(doc:select("div.title a[href]")) do
+    local chUrl = absUrl(a:attr("href"))
     if chUrl ~= "" then
-      local titleEl = html_select_first(a.html, "h2")
+      local titleEl = a:selectFirst("h2")
       table.insert(chapters, {
-        title = titleEl and string_clean(titleEl.text) or string_clean(a.text),
+        title = titleEl and string_clean(titleEl:text()) or string_clean(a:text()),
         url   = chUrl
       })
     end
@@ -484,19 +480,6 @@ function getCatalogFiltered(index, filters)
   local r = http_get(url)
   if not r.success then return { items = {}, hasNext = false } end
 
-  local items = {}
-  for _, card in ipairs(html_select(r.body, "div.block-home > div.one")) do
-    local titleEl = html_select_first(card.html, "div.title-home")
-    local bookUrl = absUrl(html_attr(card.html, "div.img-home > a", "href"))
-    local cover   = transformCover(absUrl(html_attr(card.html, "div.img-home > a > img", "src")))
-    if titleEl and bookUrl ~= "" then
-      table.insert(items, {
-        title = string_clean(titleEl.text),
-        url   = bookUrl,
-        cover = cover
-      })
-    end
-  end
-
+  local items = parseCards(r:toHtml())
   return { items = items, hasNext = #items > 0 }
 end

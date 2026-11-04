@@ -1,10 +1,24 @@
 -- ── Метаданные ────────────────────────────────────────────────────────────────
 id       = "ranobehub"
 name     = "Ranobehub"
-version  = "1.1.4"
+version  = "1.2.0"
 baseUrl  = "https://ranobehub.org/"
 language = "ru"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/ranobehub.png"
+
+-- ── Session Document Cache ───────────────────────────────────────────────────
+local _bookDocCache = {}
+
+local function fetchBookDoc(url)
+  if _bookDocCache[url] then return _bookDocCache[url] end
+  local r = http_get(url)
+  if r.success then
+    local doc = r:toHtml()
+    _bookDocCache[url] = doc
+    return doc
+  end
+  return nil
+end
 
 -- ── Хелперы ───────────────────────────────────────────────────────────────────
 
@@ -31,34 +45,22 @@ local function getBookId(bookUrl)
   return bookUrl:match("/ranobe/(%d+)")
 end
 
--- hasNext: кнопка «Дальше» присутствует и НЕ disabled (на последней странице
--- кнопка имеет атрибут disabled — предположение по разметке, не проверено).
-local function hasNextPage(html)
-  return html_select_first(html, "button:contains(Дальше):not([disabled])") ~= nil
+-- hasNext: кнопка «Дальше» присутствует и НЕ disabled
+local function hasNextPage(doc)
+  return doc:selectFirst("button:contains(Дальше):not([disabled])") ~= nil
 end
 
--- Парсит карточку каталога/поиска: a[data-book-transition-id] > h3 title,
--- img.book-cover-image, рейтинг из span.rating (текст вида "9.8").
--- title берём из h3[data-book-transition-title="true"], а не из strong —
--- strong живёт в скрытом overlay .book-cover-copy (показывается при ховере)
--- и может отсутствовать/дублироваться (проверено на фикстурах каталога и поиска).
--- ВАЖНО: href берём из поля el.href (атрибут самой карточки <a>), а не через
--- html_attr(el.html, "a", "href") — el.html в движке это innerHTML карточки,
--- вложенного тега <a> внутри нет, и такой запрос всегда возвращает пустую
--- строку (каталог и поиск возвращали 0 items — баг v1.1.0).
--- ВАЖНО: рейтинг сайта по шкале 1-10, поэтому отдаём "Rating: N/10" (как в
--- getBookRating), а не голое число — голое "9.8" приложение читает как шкалу
--- 0-5 и показывает 0 (формат rating описан в lua-plugin-guide.md).
-local function parseCards(html)
+local function parseCards(doc)
   local items = {}
-  local cards = html_select(html, "a[data-book-transition-id]")
+  local cards = doc:select("a[data-book-transition-id]")
   for _, el in ipairs(cards) do
-    local titleEl   = html_select_first(el.html, 'h3[data-book-transition-title="true"]')
-    local href      = el.href or ""
-    local cover     = html_attr(el.html, "img.book-cover-image", "src")
-    local ratingEl  = html_select_first(el.html, "span.rating")
-    local rating    = ratingEl and string_clean(ratingEl.text) or ""
-    local title     = titleEl and titleEl.text or ""
+    local titleEl  = el:selectFirst('h3[data-book-transition-title="true"]')
+    local href     = el:attr("href")
+    local coverEl  = el:selectFirst("img.book-cover-image")
+    local cover    = coverEl and coverEl:attr("src") or ""
+    local ratingEl = el:selectFirst("span.rating")
+    local rating   = ratingEl and string_clean(ratingEl:text()) or ""
+    local title    = titleEl and titleEl:text() or ""
     if title ~= "" and href ~= "" then
       local item = {
         title = string_clean(title),
@@ -81,10 +83,11 @@ function getCatalogList(index)
 
   local r = http_get(url)
   if not r.success then return { items = {}, hasNext = false } end
+  local doc = r:toHtml()
 
   return {
-    items   = parseCards(r.body),
-    hasNext = hasNextPage(r.body)
+    items   = parseCards(doc),
+    hasNext = hasNextPage(doc)
   }
 end
 
@@ -95,35 +98,37 @@ function getCatalogSearch(index, query)
 
   local r = http_get(url)
   if not r.success then return { items = {}, hasNext = false } end
+  local doc = r:toHtml()
 
   return {
-    items   = parseCards(r.body),
-    hasNext = hasNextPage(r.body)
+    items   = parseCards(doc),
+    hasNext = hasNextPage(doc)
   }
 end
 
 -- ── Детали книги (страница книги) ────────────────────────────────────────────
 
 function getBookTitle(bookUrl)
-  local r = http_get(bookUrl)
-  if not r.success then return nil end
-  local el = html_select_first(r.body, "h1")
-  return el and string_clean(el.text) or nil
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  local el = doc:selectFirst("h1")
+  return el and string_clean(el:text()) or nil
 end
 
 function getBookCoverImageUrl(bookUrl)
-  local r = http_get(bookUrl)
-  if not r.success then return nil end
-  local src = html_attr(r.body, ".book-cover img", "src")
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  local img = doc:selectFirst(".book-cover img")
+  local src = img and img:attr("src") or ""
   if src == "" then return nil end
   return absUrl(src)
 end
 
 function getBookDescription(bookUrl)
-  local r = http_get(bookUrl)
-  if not r.success then return nil end
-  local el = html_select_first(r.body, ".book-description-copy")
-  if not el then el = html_select_first(r.body, ".book-hero-summary") end
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  local el = doc:selectFirst(".book-description-copy")
+  if not el then el = doc:selectFirst(".book-hero-summary") end
   if not el then return nil end
   return string_trim(html_text(el.html))
 end
@@ -133,11 +138,11 @@ end
 function getBookRating(bookUrl)
   -- Первый span.rating на странице книги (в hero-блоке) — рейтинг читателей 1-10
   -- (текст вида "9.8"). Проверено на живом сайте.
-  local r = http_get(bookUrl)
-  if not r.success then return nil end
-  local el = html_select_first(r.body, "span.rating")
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  local el = doc:selectFirst("span.rating")
   if not el then return nil end
-  local score = string.match(string_clean(el.text), "%d+%.?%d*")
+  local score = string.match(string_clean(el:text()), "%d+%.?%d*")
   if not score then return nil end
   return "Rating: " .. score .. "/10"
 end
@@ -191,12 +196,11 @@ end
 
 function getBookStatus(bookUrl)
   -- Статус — текст ссылки .book-kicker-status (напр. "В процессе", "Завершено").
-  -- Проверено на живом сайте: селектор даёт точный статус книги.
-  local r = http_get(bookUrl)
-  if not r.success then return nil end
-  local el = html_select_first(r.body, ".book-kicker-status")
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  local el = doc:selectFirst(".book-kicker-status")
   if not el then return nil end
-  local s = string_clean(el.text)
+  local s = string_clean(el:text())
   if s == "" then return nil end
   return s
 end
@@ -205,16 +209,18 @@ function getBookLastUpdate(bookUrl)
   -- Дата обновления — атрибут datetime тега <time> внутри .book-kicker-updated
   -- (ISO 8601, напр. 2026-08-22T19:12:14.000Z). Текст тега рендерится через JS,
   -- поэтому берём именно атрибут. Фолбэк — парсинг текста (абсолютный/относит.).
-  local r = http_get(bookUrl)
-  if not r.success then return nil end
-  local dt = html_attr(r.body, ".book-kicker-updated time", "datetime")
-  if dt ~= "" then
-    local y, m, d = string.match(dt, "(%d%d%d%d)%-(%d%d)%-(%d%d)")
-    if y and m and d then return y .. "-" .. m .. "-" .. d end
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  local timeEl = doc:selectFirst(".book-kicker-updated time")
+  if timeEl then
+    local dt = timeEl:attr("datetime")
+    if dt ~= "" then
+      local y, m, d = string.match(dt, "(%d%d%d%d)%-(%d%d)%-(%d%d)")
+      if y and m and d then return y .. "-" .. m .. "-" .. d end
+    end
+    return parseBookDateText(string_clean(timeEl:text()))
   end
-  local timeEl = html_select_first(r.body, ".book-kicker-updated time")
-  if not timeEl then return nil end
-  return parseBookDateText(string_clean(timeEl.text))
+  return nil
 end
 
 -- ── Список глав (JSON API, постранично через parsePage) ───────────────────────
@@ -394,9 +400,10 @@ function getCatalogFiltered(index, filters)
 
   local r = http_get(url)
   if not r.success then return { items = {}, hasNext = false } end
+  local doc = r:toHtml()
 
   return {
-    items   = parseCards(r.body),
-    hasNext = hasNextPage(r.body)
+    items   = parseCards(doc),
+    hasNext = hasNextPage(doc)
   }
 end

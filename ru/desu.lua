@@ -1,6 +1,6 @@
 id       = "desu"
 name     = "Desu"
-version  = "1.1.4"
+version  = "1.2.0"
 baseUrl  = "https://desu.uno/"
 language = "ru"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/desu.png"
@@ -92,31 +92,28 @@ function getCatalogSearch(index, query)
     local r = http_post(baseUrl .. "manga/search/",
         "q=" .. url_encode(query) .. "&type=manga")
     if not r.success then return { items = {}, hasNext = false } end
+    local doc = r:toHtml()
     local items = {}
-    for _, card in ipairs(html_select(r.body, ".AniMangaSearchCard")) do
-        local a = html_select_first(card.html, ".AniMangaSearchCard__link")
-        local img = html_select_first(card.html, ".AniMangaSearchCard__cover")
-        local title = html_select_first(card.html, ".AniMangaSearchCard__title")
+    for _, card in ipairs(doc:select(".AniMangaSearchCard")) do
+        local a = card:selectFirst(".AniMangaSearchCard__link")
+        local img = card:selectFirst(".AniMangaSearchCard__cover")
+        local title = card:selectFirst(".AniMangaSearchCard__title")
         if a and title then
-            local url = absUrl(a.href)
+            local url = absUrl(a:attr("href"))
             if url ~= "" then
                 local item = {
-                    title = string_clean(title.text),
+                    title = string_clean(title:text()),
                     url = url,
                     cover = "",
                 }
-                -- В поиске обложки отдаются в уменьшенном виде /covers/x120/ —
-                -- заменяем на /covers/preview/ (как в каталоге и деталях).
-                if img and img.src then
-                    item.cover = absUrl(string.gsub(img.src, "/covers/x120/", "/covers/preview/"))
+                local imgSrc = img and img:attr("src") or ""
+                if imgSrc ~= "" then
+                    item.cover = absUrl(string.gsub(imgSrc, "/covers/x120/", "/covers/preview/"))
                 end
-                -- Рейтинг: <span class="is-score">8,8</span> — запятая как
-                -- десятичный разделитель, приводим к формату "8.8/10".
-                -- Скобки обязательны: string.gsub возвращает два значения,
-                -- иначе второй (счётчик замен) попадёт в tonumber как base.
-                local score = html_select_first(card.html, ".AniMangaSearchCard__facts .is-score")
-                if score and score.text then
-                    local v = tonumber((string.gsub(string_trim(score.text), ",", ".")))
+                local score = card:selectFirst(".AniMangaSearchCard__facts .is-score")
+                if score then
+                    local scoreText = score:text()
+                    local v = tonumber((string.gsub(string_trim(scoreText), ",", ".")))
                     if v and v > 0 then item.rating = tostring(v) .. "/10" end
                 end
                 table.insert(items, item)
@@ -346,35 +343,37 @@ function getCatalogFiltered(index, filters)
 
     local r = http_get(url)
     if not r.success then return { items = {}, hasNext = false } end
+    local doc = r:toHtml()
 
     local items = {}
-    for _, li in ipairs(html_select(r.body, "ol.section.memberList > li.primaryContent")) do
-        local a = html_select_first(li.html, "a.avatar")
-        local title = html_select_first(li.html, 'span[itemprop="title"]')
-        if not title then title = html_select_first(li.html, "a.animeTitle") end
+    for _, li in ipairs(doc:select("ol.section.memberList > li.primaryContent")) do
+        local a = li:selectFirst("a.avatar")
+        local title = li:selectFirst('span[itemprop="title"]')
+        if not title then title = li:selectFirst("a.animeTitle") end
         if a and title then
-            local bookUrl = absUrl(a.href)
+            local bookUrl = absUrl(a:attr("href"))
             if bookUrl ~= "" then
-                local item = { title = string_clean(title.text), url = bookUrl, cover = "" }
-                -- Обложка лежит в style="background-image: url('...')" —
-                -- селектором из style не достать, только regex.
+                local item = { title = string_clean(title:text()), url = bookUrl, cover = "" }
+                -- Обложка лежит в style="background-image: url('...')"
                 local cover = string.match(li.html, "background%-image: url%('([^']+)'%)")
                 if cover then item.cover = absUrl(cover) end
                 -- Рейтинг: второй dl.pairsInline ("Рейтинг: <dd>9.75</dd>").
-                local rating = html_select_first(li.html,
-                    "div.animeInfo dl.pairsInline:nth-child(2) dd")
-                if rating and rating.text ~= "" then
-                    local v = tonumber(string_trim(rating.text))
-                    if v and v > 0 then item.rating = tostring(v) .. "/10" end
+                local rating = li:selectFirst("div.animeInfo dl.pairsInline:nth-child(2) dd")
+                if rating then
+                    local rText = rating:text()
+                    if rText ~= "" then
+                        local v = tonumber(string_trim(rText))
+                        if v and v > 0 then item.rating = tostring(v) .. "/10" end
+                    end
                 end
                 table.insert(items, item)
             end
         end
     end
-    -- hasNext: в PageNav data-last = число страниц; при одной странице
-    -- PageNav не рендерится вовсе.
-    local last = tonumber(html_attr(r.body, "div.PageNav", "data-last")) or 0
-    local cur = tonumber(html_attr(r.body, "div.PageNav", "data-page")) or 1
+    -- hasNext: в PageNav data-last = число страниц
+    local nav = doc:selectFirst("div.PageNav")
+    local last = nav and tonumber(nav:attr("data-last")) or 0
+    local cur = nav and tonumber(nav:attr("data-page")) or 1
     return { items = items, hasNext = last > cur }
 end
 

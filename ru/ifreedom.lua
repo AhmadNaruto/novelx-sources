@@ -1,7 +1,7 @@
 -- ── Метаданные ────────────────────────────────────────────────────────────────
 id       = "ifreedom"
 name     = "iFreedom"
-version  = "1.1.6"
+version  = "1.2.0"
 baseUrl  = "https://ifreedom.su/"
 language = "ru"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/ifreedom.png"
@@ -24,17 +24,16 @@ local function normalizeNovelUrl(url)
   return url
 end
 
-local _pageCache = {}
+local _bookDocCache = {}
 
--- Кэш страницы книги: детальные функции (заголовок, обложка, описание, жанры,
--- статус, дата) вызываются движком параллельно с одним URL — кэш убирает
--- дублирующиеся HTTP-запросы.
-local function fetchPage(url)
-  if _pageCache[url] then return _pageCache[url] end
+local function fetchBookDoc(url)
+  url = normalizeNovelUrl(url)
+  if _bookDocCache[url] then return _bookDocCache[url] end
   local r = http_get(url)
   if r.success then
-    _pageCache[url] = r.body
-    return r.body
+    local doc = r:toHtml()
+    _bookDocCache[url] = doc
+    return doc
   end
   return nil
 end
@@ -51,6 +50,26 @@ local function applyStandardContentTransforms(text)
   return text
 end
 
+local function parseCards(doc)
+  if not doc then return {} end
+  local items = {}
+  for _, card in ipairs(doc:select(".booksearch .item-book-slide")) do
+    local titleEl = card:selectFirst(".block-book-slide-title")
+    local aEl = card:selectFirst("a")
+    local imgEl = card:selectFirst("img")
+    local bookUrl = aEl and normalizeNovelUrl(absUrl(aEl:attr("href"))) or ""
+    local cover   = imgEl and absUrl(imgEl:attr("src")) or ""
+    if titleEl and bookUrl ~= "" then
+      table.insert(items, {
+        title = string_clean(titleEl:text()),
+        url   = bookUrl,
+        cover = cover
+      })
+    end
+  end
+  return items
+end
+
 -- ── Каталог ───────────────────────────────────────────────────────────────────
 
 function getCatalogList(index)
@@ -60,20 +79,7 @@ function getCatalogList(index)
   local r = http_get(url)
   if not r.success then return { items = {}, hasNext = false } end
 
-  local items = {}
-  for _, card in ipairs(html_select(r.body, ".booksearch .item-book-slide")) do
-    local titleEl = html_select_first(card.html, ".block-book-slide-title")
-    local bookUrl = normalizeNovelUrl(absUrl(html_attr(card.html, "a", "href")))
-    local cover   = absUrl(html_attr(card.html, "img", "src"))
-    if titleEl and bookUrl ~= "" then
-      table.insert(items, {
-        title = string_clean(titleEl.text),
-        url   = bookUrl,
-        cover = cover
-      })
-    end
-  end
-
+  local items = parseCards(r:toHtml())
   return { items = items, hasNext = #items > 0 }
 end
 
@@ -85,75 +91,55 @@ function getCatalogSearch(index, query)
   local r = http_get(url)
   if not r.success then return { items = {}, hasNext = false } end
 
-  local items = {}
-  for _, card in ipairs(html_select(r.body, ".booksearch .item-book-slide")) do
-    local titleEl = html_select_first(card.html, ".block-book-slide-title")
-    local bookUrl = normalizeNovelUrl(absUrl(html_attr(card.html, "a", "href")))
-    local cover   = absUrl(html_attr(card.html, "img", "src"))
-    if titleEl and bookUrl ~= "" then
-      table.insert(items, {
-        title = string_clean(titleEl.text),
-        url   = bookUrl,
-        cover = cover
-      })
-    end
-  end
-
+  local items = parseCards(r:toHtml())
   return { items = items, hasNext = #items > 0 }
 end
 
 -- ── Детали книги ──────────────────────────────────────────────────────────────
 
 function getBookTitle(bookUrl)
-  bookUrl = normalizeNovelUrl(bookUrl)
-
-  local html = fetchPage(bookUrl)
-  if not html then return nil end
-  local el = html_select_first(html, "h1")
-  if el then return string_clean(el.text) end
-  return nil
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  local el = doc:selectFirst("h1")
+  return el and string_clean(el:text()) or nil
 end
 
 function getBookCoverImageUrl(bookUrl)
-  bookUrl = normalizeNovelUrl(bookUrl)
-
-  local html = fetchPage(bookUrl)
-  if not html then return nil end
-  local el = html_select_first(html, "div.book-img.block-book-slide-img > img")
-  if el then return absUrl(el.src) end
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  local el = doc:selectFirst("div.book-img.block-book-slide-img > img")
+  if el then
+    local src = el:attr("src")
+    if src and src ~= "" then return absUrl(src) end
+  end
   return nil
 end
 
 function getBookDescription(bookUrl)
-  bookUrl = normalizeNovelUrl(bookUrl)
-
-  local html = fetchPage(bookUrl)
-  if not html then return nil end
-  local el = html_select_first(html, "[data-name=\"Описание\"]")
-  if el then return string_trim(el.text) end
-  return nil
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  local el = doc:selectFirst("[data-name=\"Описание\"]")
+  return el and string_trim(el:text()) or nil
 end
 
 function getBookGenres(bookUrl)
-  bookUrl = normalizeNovelUrl(bookUrl)
-
-  local html = fetchPage(bookUrl)
-  if not html then return {} end
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return {} end
 
   local genres = {}
-  for _, block in ipairs(html_select(html, "div.book-info-list")) do
-    local icon = html_select_first(block.html, "svg.icon-tabler-tag")
+  for _, block in ipairs(doc:select("div.book-info-list")) do
+    local icon = block:selectFirst("svg.icon-tabler-tag")
     if icon then
-      for _, a in ipairs(html_select(block.html, "a")) do
-        local label = string_trim(a.text)
+      for _, a in ipairs(block:select("a")) do
+        local label = string_trim(a:text())
         if label ~= "" then table.insert(genres, label) end
       end
     end
   end
 
   if #genres == 0 then
-    for _, a in ipairs(html_select(html, "div.genreslist a")) do
-      local label = string_trim(a.text)
+    for _, a in ipairs(doc:select("div.genreslist a")) do
+      local label = string_trim(a:text())
       if label ~= "" then table.insert(genres, label) end
     end
   end
@@ -167,12 +153,11 @@ end
 -- «Перевод активен»). В блоке может быть несколько записей (автор, жанры),
 -- статус — та, что содержит ключевые слова статуса. Проверено на живом сайте.
 function getBookStatus(bookUrl)
-  bookUrl = normalizeNovelUrl(bookUrl)
-  local html = fetchPage(bookUrl)
-  if not html then return nil end
-  local blocks = html_select(html, ".book-info-list")
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  local blocks = doc:select(".book-info-list")
   for _, b in ipairs(blocks) do
-    local t = string_clean(b.text)
+    local t = string_clean(b:text())
     if t ~= "" and (
         string.find(t, "заверш", 1, true) or string.find(t, "перевод", 1, true)
      or string.find(t, "статус", 1, true)  or string.find(t, "продолжа", 1, true)
@@ -184,19 +169,17 @@ function getBookStatus(bookUrl)
 end
 
 function getBookLastUpdate(bookUrl)
-  bookUrl = normalizeNovelUrl(bookUrl)
-
-  local html = fetchPage(bookUrl)
-  if not html then return nil end
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
 
   -- Дата последнего обновления = дата самой свежей главы. Список глав на
   -- странице отсортирован от новых к старым, поэтому первая .chapterinfo —
   -- самая новая. Дата лежит в span.timechapter в формате ДД.ММ.ГГ (иногда ГГГГ).
-  local firstChapter = html_select_first(html, "div.chapterinfo")
+  local firstChapter = doc:selectFirst("div.chapterinfo")
   if not firstChapter then return nil end
-  local timeEl = html_select_first(firstChapter.html, "span.timechapter")
+  local timeEl = firstChapter:selectFirst("span.timechapter")
   if not timeEl then return nil end
-  local ds = string_trim(timeEl.text)
+  local ds = string_trim(timeEl:text())
   if ds == "" then return nil end
 
   -- Абсолютная дата: ДД.ММ.ГГ или ДД.ММ.ГГГГ
@@ -228,19 +211,18 @@ end
 -- ── Список глав ───────────────────────────────────────────────────────────────
 
 function getChapterList(bookUrl)
-  bookUrl = normalizeNovelUrl(bookUrl)
-
-  local r = http_get(bookUrl)
-  if not r.success then return {} end
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return {} end
 
   local chapters = {}
-  for _, a in ipairs(html_select(r.body, "div.chapterinfo a")) do
-    local chUrl = absUrl(a.href)
+  for _, a in ipairs(doc:select("div.chapterinfo a")) do
+    local href = a:attr("href")
+    local chUrl = href and absUrl(href) or ""
     -- Платные главы ведут на /koshelek/ (страница абонемента), а не на главу —
     -- пропускаем их, иначе движок откроет страницу оплаты вместо текста
     if chUrl ~= "" and not chUrl:find("koshelek") then
       table.insert(chapters, {
-        title = string_clean(a.text),
+        title = string_clean(a:text()),
         url   = chUrl
       })
     end
@@ -256,13 +238,10 @@ end
 -- ── Хэш для обновлений ────────────────────────────────────────────────────────
 
 function getChapterListHash(bookUrl)
-  bookUrl = normalizeNovelUrl(bookUrl)
-
-  local r = http_get(bookUrl)
-  if not r.success then return nil end
-  local el = html_select_first(r.body, "div.book-info-list:has(svg.icon-tabler-list-check) div")
-  if el then return string_clean(el.text) end
-  return nil
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  local el = doc:selectFirst("div.book-info-list:has(svg.icon-tabler-list-check) div")
+  return el and string_clean(el:text()) or nil
 end
 
 -- ── Текст главы ───────────────────────────────────────────────────────────────
@@ -386,19 +365,6 @@ function getCatalogFiltered(index, filters)
   local r = http_get(url)
   if not r.success then return { items = {}, hasNext = false } end
 
-  local items = {}
-  for _, card in ipairs(html_select(r.body, ".booksearch .item-book-slide")) do
-    local titleEl = html_select_first(card.html, ".block-book-slide-title")
-    local bookUrl = normalizeNovelUrl(absUrl(html_attr(card.html, "a", "href")))
-    local cover   = absUrl(html_attr(card.html, "img", "src"))
-    if titleEl and bookUrl ~= "" then
-      table.insert(items, {
-        title = string_clean(titleEl.text),
-        url   = bookUrl,
-        cover = cover
-      })
-    end
-  end
-
+  local items = parseCards(r:toHtml())
   return { items = items, hasNext = #items > 0 }
 end
