@@ -24,7 +24,7 @@
 --   4) Ajuste opcional "Chapter list = Lite": no recorre las ~N/25 páginas de capítulos (ver más abajo).
 id       = "ranobes"
 name     = "Ranobes"
-version  = "1.1.0"
+version  = "1.2.0"
 baseUrl  = "https://ranobes.net"
 language = "en"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/refs/heads/main/icons/ranobes.png"
@@ -171,8 +171,8 @@ end
 -- ── Tarjetas de listado ───────────────────────────────────────────────────────
 
 -- ¿hay página siguiente? En la barra de navegación de DLE la flecha solo es un enlace si existe.
-local function hasNextLink(body)
-    return html_select_first(body, ".page_next a[href]") ~= nil
+local function hasNextLink(doc)
+    return doc:selectFirst(".page_next a[href]") ~= nil
 end
 
 -- /updates/: cada fila enlaza a un CAPÍTULO. Se deriva la URL de la novela.
@@ -182,18 +182,19 @@ local function novelUrlFromChapterUrl(u)
     return baseUrl .. "/novels/" .. id .. "-" .. slug .. ".html"
 end
 
-local function parseUpdates(body)
+local function parseUpdates(doc)
     local items, seen = {}, {}
-    for _, row in ipairs(html_select(body, "div.block.story_line")) do
-        local a = html_select_first(row.html, "a[href]")
-        local t = html_select_first(row.html, "h3")
+    for _, row in ipairs(doc:select("div.block.story_line")) do
+        local a = row:selectFirst("a[href]")
+        local t = row:selectFirst("h3")
         if a and t then
-            local url = novelUrlFromChapterUrl(toBase(a.href))
-            local title = string_clean(t.text)
+            local url = novelUrlFromChapterUrl(toBase(a:attr("href")))
+            local title = string_clean(t:text())
             if url and title ~= "" and not seen[url] then
                 seen[url] = true
                 local item = { title = title, url = url }
-                local cover = coverFromStyle(html_attr(row.html, "i.cover", "style"))
+                local coverEl = row:selectFirst("i.cover")
+                local cover = coverEl and coverFromStyle(coverEl:attr("style")) or ""
                 if cover ~= "" then item.cover = cover end
                 table.insert(items, item)
             end
@@ -203,25 +204,26 @@ local function parseUpdates(body)
 end
 
 -- /novels/, /f/…, /search/…: article.shortstory con el título en h2.title a
-local function parseArticles(body)
-    local cards = html_select(body, "article.shortstory")
-    if #cards == 0 then cards = html_select(body, "article.block.story") end
+local function parseArticles(doc)
+    local cards = doc:select("article.shortstory")
+    if #cards == 0 then cards = doc:select("article.block.story") end
 
     local items, seen = {}, {}
     for _, card in ipairs(cards) do
-        local a = html_select_first(card.html, ".title a[href]")
+        local a = card:selectFirst(".title a[href]")
         if a then
-            local url = toBase(a.href)
+            local url = toBase(a:attr("href"))
             -- solo fichas de novela (/novels/<id>-<slug>.html)
             if url:match("/novels/%d+%-") and not seen[url] then
-                local title = string_clean(a.text)
+                local title = string_clean(a:text())
                 if title ~= "" then
                     seen[url] = true
                     local item = { title = title, url = url }
-                    local cover = coverFromStyle(html_attr(card.html, "figure.cover", "style"))
+                    local coverEl = card:selectFirst("figure.cover")
+                    local cover = coverEl and coverFromStyle(coverEl:attr("style")) or ""
                     if cover ~= "" then item.cover = cover end
-                    local r = html_select_first(card.html, ".rate-drop strong")
-                    local rating = r and string_clean(r.text) or ""
+                    local r = card:selectFirst(".rate-drop strong")
+                    local rating = r and string_clean(r:text()) or ""
                     if rating ~= "" and rating ~= "0" then item.rating = rating end
                     table.insert(items, item)
                 end
@@ -245,11 +247,12 @@ local function fetchList(url, parser)
         end
         return { items = {}, hasNext = false }
     end
-    local items = parser(r.body)
+    local doc = r:toHtml()
+    local items = parser(doc)
     if #items == 0 then
         log_info("ranobes: 0 resultados en " .. url .. " (body=" .. #r.body .. " bytes)")
     end
-    return { items = items, hasNext = (#items > 0 and hasNextLink(r.body)) }
+    return { items = items, hasNext = (#items > 0 and hasNextLink(doc)) }
 end
 
 local function pagePath(base, page)

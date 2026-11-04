@@ -1,10 +1,24 @@
 -- ── Метаданные ────────────────────────────────────────────────────────────────
 id       = "empirenovel"
 name     = "Empire Novel"
-version  = "2.4.1"
+version  = "2.5.0"
 baseUrl  = "https://www.empirenovel.com/"
 language = "en"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/empirenovel.png"
+
+-- ── Session Document Cache ───────────────────────────────────────────────────
+local _bookDocCache = {}
+
+local function fetchBookDoc(url)
+  if _bookDocCache[url] then return _bookDocCache[url] end
+  local r = http_get(url)
+  if r.success then
+    local doc = r:toHtml()
+    _bookDocCache[url] = doc
+    return doc
+  end
+  return nil
+end
 
 -- ── Хелперы ───────────────────────────────────────────────────────────────────
 
@@ -32,10 +46,10 @@ local function applyStandardContentTransforms(text)
 end
 
 -- Последняя страница пагинации ("ul.pagination a.page-link"), по умолчанию 1.
-local function getLastPage(body)
+local function getLastPage(doc)
   local lastPage = 1
-  for _, a in ipairs(html_select(body, "ul.pagination a.page-link")) do
-    local n = tonumber(string_trim(a.text))
+  for _, a in ipairs(doc:select("ul.pagination a.page-link")) do
+    local n = tonumber(string_trim(a:text()))
     if n and n > lastPage then lastPage = n end
   end
   return lastPage
@@ -48,32 +62,34 @@ end
 -- Обложка: img.rounded-3.lazyload → data-src (с ведущими/хвостовыми пробелами).
 
 -- Парсинг страницы каталога (используется и в getCatalogList, и в getCatalogFiltered).
-local function parseCatalog(body)
+local function parseCatalog(doc)
   local items = {}
-  for _, card in ipairs(html_select(body, "div.row.row-cols-sm-2.p-2 > div.col")) do
-    local titleEl = html_select_first(card.html, "a[href*='/novel/'] h2.fs-6.fw-bold, a[href*='/novel/']")
+  for _, card in ipairs(doc:select("div.row.row-cols-sm-2.p-2 > div.col")) do
+    local titleEl = card:selectFirst("a[href*='/novel/'] h2.fs-6.fw-bold, a[href*='/novel/']")
     if titleEl then
-      local cover = string_trim(html_attr(card.html, "img.rounded-3.lazyload", "data-src"))
+      local img = card:selectFirst("img.rounded-3.lazyload")
+      local cover = img and string_trim(img:attr("data-src")) or ""
       if cover == "" or cover:find("^data:image") then
-        cover = string_trim(html_attr(card.html, "img.rounded-3.lazyload", "src"))
+        cover = img and string_trim(img:attr("src")) or ""
       end
       table.insert(items, {
-        title = string_clean(titleEl.text),
-        url   = absUrl(titleEl.href),
+        title = string_clean(titleEl:text()),
+        url   = absUrl(titleEl:attr("href")),
         cover = (cover ~= "") and absUrl(cover) or nil,
       })
     end
   end
 
-  return { items = items, lastPage = getLastPage(body) }
+  return { items = items, lastPage = getLastPage(doc) }
 end
 
 function getCatalogList(index)
   local page = (index or 0) + 1
   local r = http_get(baseUrl .. "novels-list?page=" .. page)
   if not r.success then return { items = {}, hasNext = false } end
+  local doc = r:toHtml()
 
-  local res = parseCatalog(r.body)
+  local res = parseCatalog(doc)
   return { items = res.items, hasNext = page < res.lastPage and #res.items > 0 }
 end
 
@@ -192,35 +208,39 @@ function getCatalogFiltered(index, filters)
 
   local r = http_get(url)
   if not r.success then return { items = {}, hasNext = false } end
+  local doc = r:toHtml()
 
-  local res = parseCatalog(r.body)
+  local res = parseCatalog(doc)
   return { items = res.items, hasNext = page < res.lastPage and #res.items > 0 }
 end
 
 -- ── Детали книги ──────────────────────────────────────────────────────────────
 
 function getBookTitle(bookUrl)
-  local r = http_get(bookUrl)
-  if not r.success then return nil end
-  local el = html_select_first(r.body, "h1")
-  if el then return string_clean(el.text) end
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  local el = doc:selectFirst("h1")
+  if el then return string_clean(el:text()) end
   return nil
 end
 
 function getBookCoverImageUrl(bookUrl)
-  local r = http_get(bookUrl)
-  if not r.success then return nil end
-  local cover = html_attr(r.body, "meta[property='og:image']", "content")
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  local meta = doc:selectFirst("meta[property='og:image']")
+  local cover = meta and meta:attr("content") or ""
   if cover ~= "" then return absUrl(cover) end
-  cover = string_trim(html_attr(r.body, "img.rounded-3.lazyload[data-src]", "data-src"))
+  local img = doc:selectFirst("img.rounded-3.lazyload[data-src]")
+  cover = img and string_trim(img:attr("data-src")) or ""
   if cover ~= "" then return absUrl(cover) end
   return nil
 end
 
 function getBookDescription(bookUrl)
-  local r = http_get(bookUrl)
-  if not r.success then return "" end
-  local meta = html_attr(r.body, "meta[name='description']", "content")
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return "" end
+  local metaEl = doc:selectFirst("meta[name='description']")
+  local meta = metaEl and metaEl:attr("content") or ""
   if meta == "" then return "" end
   local desc = regex_replace(meta, "(?i)^(Read\\s+(translated\\s+)?version\\s+of\\s+|Read\\s+)", "")
   desc = regex_replace(desc, "(?i)\\s+for\\s+free\\.?\\s*$", "")
@@ -233,11 +253,11 @@ end
 -- (например <a class="category px-2 py-1 rounded text-uppercase" itemprop="genre">).
 
 function getBookGenres(bookUrl)
-  local r = http_get(bookUrl)
-  if not r.success then return {} end
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return {} end
   local genres = {}
-  for _, a in ipairs(html_select(r.body, "a.category[itemprop='genre']")) do
-    local g = string_clean(a.text)
+  for _, a in ipairs(doc:select("a.category[itemprop='genre']")) do
+    local g = string_clean(a:text())
     if g ~= "" then
       table.insert(genres, g)
     end
@@ -276,10 +296,10 @@ local function parseFrDate(s)
 end
 
 function getBookStatus(bookUrl)
-  local r = http_get(bookUrl)
-  if not r.success then return nil end
-  for _, row in ipairs(html_select(r.body, "div.show_details div.d-flex.justify-content-between")) do
-    local t = row.text
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  for _, row in ipairs(doc:select("div.show_details div.d-flex.justify-content-between")) do
+    local t = row:text()
     if t and string_starts_with(t, "Status") then
       local s = string_trim(string.gsub(t, "^Status", ""))
       return s ~= "" and s or nil
@@ -289,11 +309,11 @@ function getBookStatus(bookUrl)
 end
 
 function getBookLastUpdate(bookUrl)
-  local r = http_get(bookUrl)
-  if not r.success then return nil end
-  local first = html_select_first(r.body, "div.small.fst-italic")
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  local first = doc:selectFirst("div.small.fst-italic")
   if not first then return nil end
-  return parseFrDate(first.text)
+  return parseFrDate(first:text())
 end
 
 -- ── Список глав (PAGE_BASED, через parsePage) ─────────────────────────────────

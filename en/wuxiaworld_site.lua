@@ -1,11 +1,25 @@
 -- ── Метаданные ────────────────────────────────────────────────────────────────
 id       = "wuxia_world_site"
 name     = "WuxiaWorld.site"
--- Version: 1.1.1
-version  = "1.1.1"
+-- Version: 1.2.0
+version  = "1.2.0"
 baseUrl  = "https://wuxiaworld.site/"
 language = "en"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/wuxiaworld.site.png"
+
+-- ── Session Document Cache ───────────────────────────────────────────────────
+local _bookDocCache = {}
+
+local function fetchBookDoc(url)
+  if _bookDocCache[url] then return _bookDocCache[url] end
+  local r = http_get(url)
+  if r.success then
+    local doc = r:toHtml()
+    _bookDocCache[url] = doc
+    return doc
+  end
+  return nil
+end
 
 -- ── Хелперы ───────────────────────────────────────────────────────────────────
 
@@ -16,28 +30,11 @@ local function absUrl(href)
   return url_resolve(baseUrl, href)
 end
 
--- Рейтинг из карточки каталога/поиска или со страницы книги:
--- <div class="post-total-rating allow_vote"><span class="score font-meta total_votes">4.1</span></div>
--- На странице книги селектор .score.font-meta.total_votes встречается дважды
--- (рейтинг и виджет «Your Rating»), поэтому берём именно вложенный в .post-total-rating.
-local function extractRating(html)
-  local el = html_select_first(html, ".post-total-rating .score")
+local function extractRating(node)
+  local el = node:selectFirst(".post-total-rating .score")
   if el then
-    local r = string_clean(el.text)
+    local r = string_clean(el:text())
     if r ~= "" then return r end
-  end
-  return nil
-end
-
--- Общая загрузка страницы книги с кэшем в рамках одного вызова движка
--- (детальные функции вызываются параллельно — кэш убирает лишние запросы).
-local _pageCache = {}
-local function fetchBookPage(url)
-  if _pageCache[url] then return _pageCache[url] end
-  local r = http_get(url)
-  if r.success then
-    _pageCache[url] = r.body
-    return r.body
   end
   return nil
 end
@@ -62,18 +59,19 @@ function getCatalogList(index)
 
   local r = http_get(url)
   if not r.success then return { items = {}, hasNext = false } end
+  local doc = r:toHtml()
 
   local items = {}
-  for _, card in ipairs(html_select(r.body, ".page-item-detail")) do
-    local titleEl = html_select_first(card.html, ".post-title h3 a")
+  for _, card in ipairs(doc:select(".page-item-detail")) do
+    local titleEl = card:selectFirst(".post-title h3 a")
     if titleEl then
-      local bookUrl = absUrl(titleEl.href)
-      local cover   = html_attr(card.html, ".c-image-hover img", "data-src")
-      if cover == "" then cover = html_attr(card.html, ".c-image-hover img", "src") end
-      local t = string_clean(titleEl.text)
+      local bookUrl = absUrl(titleEl:attr("href"))
+      local img = card:selectFirst(".c-image-hover img")
+      local cover = img and (img:attr("data-src") ~= "" and img:attr("data-src") or img:attr("src")) or ""
+      local t = string_clean(titleEl:text())
       if bookUrl ~= "" and t ~= "" then
         local item = { title = t, url = bookUrl, cover = absUrl(cover) }
-        local rating = extractRating(card.html)
+        local rating = extractRating(card)
         if rating then item.rating = rating end
         table.insert(items, item)
       end
@@ -96,18 +94,19 @@ function getCatalogSearch(index, query)
 
   local r = http_get(url)
   if not r.success then return { items = {}, hasNext = false } end
+  local doc = r:toHtml()
 
   local items = {}
-  for _, card in ipairs(html_select(r.body, ".c-tabs-item__content")) do
-    local titleEl = html_select_first(card.html, ".post-title h3 a")
+  for _, card in ipairs(doc:select(".c-tabs-item__content")) do
+    local titleEl = card:selectFirst(".post-title h3 a")
     if titleEl then
-      local bookUrl = absUrl(titleEl.href)
-      local cover   = html_attr(card.html, ".c-image-hover img", "data-src")
-      if cover == "" then cover = html_attr(card.html, ".c-image-hover img", "src") end
-      local t = string_clean(titleEl.text)
+      local bookUrl = absUrl(titleEl:attr("href"))
+      local img = card:selectFirst(".c-image-hover img")
+      local cover = img and (img:attr("data-src") ~= "" and img:attr("data-src") or img:attr("src")) or ""
+      local t = string_clean(titleEl:text())
       if bookUrl ~= "" and t ~= "" then
         local item = { title = t, url = bookUrl, cover = absUrl(cover) }
-        local rating = extractRating(card.html)
+        local rating = extractRating(card)
         if rating then item.rating = rating end
         table.insert(items, item)
       end
@@ -120,38 +119,38 @@ end
 -- ── Детали книги ──────────────────────────────────────────────────────────────
 
 function getBookTitle(bookUrl)
-  local r = http_get(bookUrl)
-  if not r.success then return nil end
-  local el = html_select_first(r.body, "h1")
-  if el then return string_clean(el.text) end
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  local el = doc:selectFirst("h1")
+  if el then return string_clean(el:text()) end
   return nil
 end
 
 function getBookCoverImageUrl(bookUrl)
-  local r = http_get(bookUrl)
-  if not r.success then return nil end
-  local src = html_attr(r.body, ".summary_image img", "data-src")
-  if src == "" then src = html_attr(r.body, ".summary_image img", "src") end
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  local img = doc:selectFirst(".summary_image img")
+  if not img then return nil end
+  local src = img:attr("data-src")
+  if src == "" then src = img:attr("src") end
   if src ~= "" then return absUrl(src) end
   return nil
 end
 
 function getBookDescription(bookUrl)
-  local r = http_get(bookUrl)
-  if not r.success then return nil end
-  local el = html_select_first(r.body, ".summary__content")
-  if el then return string_trim(el.text) end
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  local el = doc:selectFirst(".summary__content")
+  if el then return string_trim(el:text()) end
   return nil
 end
 
 -- ── Рейтинг книги ─────────────────────────────────────────────────────────────
 
--- Рейтинг со страницы книги: <span class="score font-meta total_votes">4.1</span>
--- внутри .post-total-rating. Только рейтинг, список глав не трогаем; nil при ошибке.
 function getBookRating(bookUrl)
-  local r = http_get(bookUrl)
-  if not r.success then return nil end
-  return extractRating(r.body)
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  return extractRating(doc)
 end
 
 -- ── Список глав (POST AJAX) ───────────────────────────────────────────────────
@@ -188,10 +187,10 @@ end
 -- ── Хэш для обновлений ────────────────────────────────────────────────────────
 
 function getChapterListHash(bookUrl)
-  local r = http_get(bookUrl)
-  if not r.success then return nil end
-  local el = html_select_first(r.body, "#btn-read-first")
-  if el then return el.href end
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  local el = doc:selectFirst("#btn-read-first")
+  if el then return el:attr("href") end
   return nil
 end
 
@@ -207,11 +206,11 @@ end
 -- ── Жанры книги ───────────────────────────────────────────────────────────────
 
 function getBookGenres(bookUrl)
-  local r = http_get(bookUrl)
-  if not r.success then return {} end
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return {} end
   local genres = {}
-  for _, a in ipairs(html_select(r.body, ".genres-content a")) do
-    local g = string_trim(a.text)
+  for _, a in ipairs(doc:select(".genres-content a")) do
+    local g = string_trim(a:text())
     if g ~= "" then table.insert(genres, g) end
   end
   return genres
@@ -219,24 +218,20 @@ end
 
 -- ── Status / Last update ───────────────────────────────────────────────────
 
--- Статус книги: <div class="post-status"><div class="summary-content">OnGoing</div></div>
--- Текст оставляем как на сайте (без маппинга), через string_clean.
 function getBookStatus(bookUrl)
-  local html = fetchBookPage(bookUrl)
-  if not html then return nil end
-  local el = html_select_first(html, ".post-status .summary-content")
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  local el = doc:selectFirst(".post-status .summary-content")
   if not el then return nil end
-  local v = string_clean(el.text)
+  local v = string_clean(el:text())
   return v ~= "" and v or nil
 end
 
--- Дата обновления: <meta property="article:modified_time"
--- content="2022-06-29T07:45:21+00:00"/> — сайт отдаёт ISO-дату со временем,
--- оставляем только YYYY-MM-DD (тот же паттерн, что в en/novelarrow.lua).
 function getBookLastUpdate(bookUrl)
-  local html = fetchBookPage(bookUrl)
-  if not html then return nil end
-  local v = html_attr(html, "meta[property='article:modified_time']", "content")
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  local meta = doc:selectFirst("meta[property='article:modified_time']")
+  local v = meta and meta:attr("content") or ""
   if v == "" then return nil end
   local y, m, d = string.match(v, "(%d%d%d%d)%-(%d%d)%-(%d%d)")
   return y and (y .. "-" .. m .. "-" .. d) or nil
@@ -358,18 +353,19 @@ function getCatalogFiltered(index, filters)
 
   local r = http_get(url)
   if not r.success then return { items = {}, hasNext = false } end
+  local doc = r:toHtml()
 
   local items = {}
-  for _, card in ipairs(html_select(r.body, ".c-tabs-item__content")) do
-    local titleEl = html_select_first(card.html, ".post-title h3 a")
+  for _, card in ipairs(doc:select(".c-tabs-item__content")) do
+    local titleEl = card:selectFirst(".post-title h3 a")
     if titleEl then
-      local bookUrl = absUrl(titleEl.href)
-      local cover   = html_attr(card.html, ".tab-thumb img", "data-src")
-      if cover == "" then cover = html_attr(card.html, ".tab-thumb img", "src") end
-      local t = string_clean(titleEl.text)
+      local bookUrl = absUrl(titleEl:attr("href"))
+      local img = card:selectFirst(".tab-thumb img")
+      local cover = img and (img:attr("data-src") ~= "" and img:attr("data-src") or img:attr("src")) or ""
+      local t = string_clean(titleEl:text())
       if bookUrl ~= "" and t ~= "" then
         local item = { title = t, url = bookUrl, cover = absUrl(cover) }
-        local rating = extractRating(card.html)
+        local rating = extractRating(card)
         if rating then item.rating = rating end
         table.insert(items, item)
       end

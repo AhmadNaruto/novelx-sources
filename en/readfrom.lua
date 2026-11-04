@@ -1,6 +1,6 @@
 id       = "readfrom"
 name     = "Read From Net"
-version  = "1.5.1"
+version  = "1.6.0"
 baseUrl  = "https://readfrom.net/"
 language = "en"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/readfrom.png"
@@ -9,14 +9,16 @@ function getUserAgentPreset()
   return "Safari Mobile"
 end
 
-local _pageCache = {}
+-- ── Session Document Cache ───────────────────────────────────────────────────
+local _bookDocCache = {}
 
-local function fetchPage(url)
-  if _pageCache[url] then return _pageCache[url] end
+local function fetchBookDoc(url)
+  if _bookDocCache[url] then return _bookDocCache[url] end
   local r = http_get(url)
   if r.success then
-    _pageCache[url] = r.body
-    return r.body
+    local doc = r:toHtml()
+    _bookDocCache[url] = doc
+    return doc
   end
   return nil
 end
@@ -43,43 +45,44 @@ local function applyStandardContentTransforms(text)
 end
 
 local function parseCatalogCard(card, isSearch)
-  local a = html_select_first(card.html, "h2.title a")
+  local a = card:selectFirst("h2.title a")
   if not a then return nil end
-  local title = string_clean(a.text)
+  local title = string_clean(a:text())
   if title == "" then return nil end
-  local coverEl = html_select_first(card.html, "a.highslide img")
+  local coverEl = card:selectFirst("a.highslide img")
   local genres = {}
   local author = ""
   local description = ""
   if isSearch then
-    local authorEl = html_select_first(card.html, "h5.title a")
-    if authorEl then author = string_clean(authorEl.text) end
-    local descEl = html_select_first(card.html, "div.text5")
+    local authorEl = card:selectFirst("h5.title a")
+    if authorEl then author = string_clean(authorEl:text()) end
+    local descEl = card:selectFirst("div.text5")
     if descEl then description = string_trim(html_text(descEl.html)) end
   else
-    for _, g in ipairs(html_select(card.html, "h2 a[title*='Genre']") or {}) do
-      table.insert(genres, string_clean(g.text))
+    for _, g in ipairs(card:select("h2 a[title*='Genre']") or {}) do
+      table.insert(genres, string_clean(g:text()))
     end
-    local authorEl = html_select_first(card.html, "h4 a")
-    if authorEl then author = string_clean(authorEl.text) end
-    local descEl = html_select_first(card.html, "div.text3")
+    local authorEl = card:selectFirst("h4 a")
+    if authorEl then author = string_clean(authorEl:text()) end
+    local descEl = card:selectFirst("div.text3")
     if descEl then description = string_trim(html_text(descEl.html)) end
   end
+  local href = a:attr("href")
   return {
     title = title,
-    url = absUrl(a.href),
-    cover = coverEl and coverEl.src or nil,
+    url = absUrl(href),
+    cover = coverEl and absUrl(coverEl:attr("src")) or nil,
     description = description,
     genres = genres,
     author = author,
-    path = getRelPath(absUrl(a.href)),
+    path = getRelPath(absUrl(href)),
   }
 end
 
-local function parseCatalogPage(html, isSearch)
+local function parseCatalogPage(doc, isSearch)
   local items = {}
   local sel = isSearch and "div.text article.box.story.shortstory" or "#dle-content > article.box.story.shortstory"
-  for _, card in ipairs(html_select(html, sel) or {}) do
+  for _, card in ipairs(doc:select(sel) or {}) do
     local item = parseCatalogCard(card, isSearch)
     if item then table.insert(items, item) end
   end
@@ -90,8 +93,9 @@ function getCatalogList(index)
   local page = (index or 0) + 1
   local r = http_get(baseUrl .. "allbooks/page/" .. page .. "/")
   if not r.success then return { items = {}, hasNext = false } end
-  local items = parseCatalogPage(r.body, false)
-  local hasNext = #html_select(r.body, "div.navigation span.page_next a") > 0
+  local doc = r:toHtml()
+  local items = parseCatalogPage(doc, false)
+  local hasNext = #doc:select("div.navigation span.page_next a") > 0
   return { items = items, hasNext = hasNext }
 end
 
@@ -99,16 +103,17 @@ function getCatalogSearch(index, query)
   if index > 0 then return { items = {}, hasNext = false } end
   local r = http_get(baseUrl .. "build_in_search/?q=" .. url_encode(query))
   if not r.success then return { items = {}, hasNext = false } end
-  local items = parseCatalogPage(r.body, true)
+  local doc = r:toHtml()
+  local items = parseCatalogPage(doc, true)
   return { items = items, hasNext = false }
 end
 
 function getBookTitle(bookUrl)
-  local body = fetchPage(bookUrl)
-  if not body then return nil end
-  local el = html_select_first(body, "h2.title")
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  local el = doc:selectFirst("h2.title")
   if not el then return nil end
-  local text = el.text
+  local text = el:text()
   local cleaned = regex_replace(text, ",\\s+[Pp]age\\s+\\d+\\s*$", "")
   if cleaned ~= text then
     return string_clean(cleaned)
@@ -117,19 +122,19 @@ function getBookTitle(bookUrl)
 end
 
 function getBookCoverImageUrl(bookUrl)
-  local body = fetchPage(bookUrl)
-  if not body then return nil end
-  local el = html_select_first(body, "a.highslide img")
-  local src = el and el.src or ""
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  local el = doc:selectFirst("a.highslide img")
+  local src = el and el:attr("src") or ""
   return src ~= "" and absUrl(src) or nil
 end
 
 function getBookDescription(bookUrl)
-  local body = fetchPage(bookUrl)
-  if not body then return "" end
-  local el = html_select_first(body, "meta[name='description']")
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return "" end
+  local el = doc:selectFirst("meta[name='description']")
   if el then
-    local desc = el.content or ""
+    local desc = el:attr("content") or ""
     if desc ~= "" and not string_starts_with(desc, "Chapter") then
       return string_trim(desc)
     end
@@ -138,27 +143,28 @@ function getBookDescription(bookUrl)
 end
 
 function getBookGenres(bookUrl)
-  local body = fetchPage(bookUrl)
-  if not body then return {} end
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return {} end
   local genres = {}
-  for _, g in ipairs(html_select(body, "h2 a[title*='Genre']") or {}) do
-    table.insert(genres, string_clean(g.text))
+  for _, g in ipairs(doc:select("h2 a[title*='Genre']") or {}) do
+    table.insert(genres, string_clean(g:text()))
   end
   return genres
 end
 
 function getChapterList(bookUrl)
-  local r = http_get(bookUrl)
-  if not r.success then return {} end
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return {} end
   local chapters = {}
   table.insert(chapters, { title = "1", url = bookUrl })
-  local navEl = html_select_first(r.body, "div.splitnewsnavigation2 div.pages")
+  local navEl = doc:selectFirst("div.splitnewsnavigation2 div.pages")
   if navEl then
-    for _, a in ipairs(html_select(navEl.html, "a") or {}) do
-      if a.href and a.href ~= "" then
+    for _, a in ipairs(navEl:select("a") or {}) do
+      local href = a:attr("href")
+      if href and href ~= "" then
         table.insert(chapters, {
-          title = string_clean(a.text),
-          url = absUrl(a.href)
+          title = string_clean(a:text()),
+          url = absUrl(href)
         })
       end
     end
@@ -167,13 +173,13 @@ function getChapterList(bookUrl)
 end
 
 function getChapterListHash(bookUrl)
-  local r = http_get(bookUrl)
-  if not r.success then return nil end
-  local navEl = html_select_first(r.body, "div.splitnewsnavigation2 div.pages")
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  local navEl = doc:selectFirst("div.splitnewsnavigation2 div.pages")
   if not navEl then return nil end
-  local pages = html_select(navEl.html, "a")
+  local pages = navEl:select("a")
   local last = pages[#pages]
-  return last and last.href or nil
+  return last and last:attr("href") or nil
 end
 
 function getChapterText(html, url)

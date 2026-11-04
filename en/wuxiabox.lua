@@ -1,33 +1,33 @@
 id       = "wuxiabox"
 name     = "WuxiaBox"
-version  = "1.0.1"
+version  = "1.1.0"
 baseUrl  = "https://www.wuxiabox.com/"
 language = "en"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/wuxiabox.png"
 
 -- ── Хелперы ──
 
--- Абсолютный URL из относительного (href из HTML).
 local function absUrl(href)
-	if href == "" then return "" end
+	if not href or href == "" then return "" end
 	if string_starts_with(href, "http") then return href end
 	if string_starts_with(href, "//") then return "https:" .. href end
 	return url_resolve(baseUrl, href)
 end
 
--- Кэш страниц книги: движок вызывает функции деталей параллельно с одним URL,
--- поэтому хватает одну страницу и переиспользуем её.
-local _pageCache = {}
+-- ── Session Document Cache ───────────────────────────────────────────────────
+local _bookDocCache = {}
 
-local function fetchPage(url)
-	if _pageCache[url] then return _pageCache[url] end
+local function fetchBookDoc(url)
+	if _bookDocCache[url] then return _bookDocCache[url] end
 	local r = http_get(url)
-	if r.success then _pageCache[url] = r.body return r.body end
+	if r.success then
+		local doc = r:toHtml()
+		_bookDocCache[url] = doc
+		return doc
+	end
 	return nil
 end
 
--- Стандартная очистка текста главы: нормализация, домен, дубль заголовка,
--- строки переводчика, обрезка.
 local function applyStandardContentTransforms(str)
 	str = string_normalize(str)
 	str = regex_replace(str, "(?m)(?i)^\\s*WuxiaBox.*$\\s*", "")
@@ -54,39 +54,34 @@ local function normalizeUpdateDate(relative)
 	return os.date("%Y-%m-%d", os.time() - n * secs)
 end
 
--- Slug книги из bookUrl: имя файла без расширения .html.
--- Используем string.match (возвращает захваченную строку), а не
--- regex_match (тот возвращает список всех совпадений).
 local function getSlug(bookUrl)
 	return string.match(bookUrl, "([^/]+)%.html")
 end
 
--- Общий парсер карточек каталога/поиска/фильтров (li.novel-item).
-local function parseItems(html)
+local function parseItems(doc)
 	local items = {}
-	local cards = html_select(html, "ul.novel-list li.novel-item")
+	local cards = doc:select("ul.novel-list li.novel-item")
 	for _, card in ipairs(cards) do
-		local a = html_select_first(card.html, "a[href]")
+		local a = card:selectFirst("a[href]")
 		if a then
-			local title = html_select_first(card.html, "h4.novel-title")
-			local cover = html_attr(card.html, "figure.novel-cover img, .cover img", "data-src")
-			if cover == "" or not cover then cover = html_attr(card.html, "figure.novel-cover img, .cover img", "src") end
+			local title = card:selectFirst("h4.novel-title")
+			local img = card:selectFirst("figure.novel-cover img, .cover img")
+			local cover = img and (img:attr("data-src") ~= "" and img:attr("data-src") or img:attr("src")) or ""
 			table.insert(items, {
-				title = string_clean(title and title.text or ""),
-				url = absUrl(a.href),
-				cover = absUrl(cover or ""),
+				title = string_clean(title and title:text() or ""),
+				url = absUrl(a:attr("href")),
+				cover = absUrl(cover),
 			})
 		end
 	end
 	return { items = items, hasNext = false }
 end
 
--- Есть ли следующая страница каталога (index с 0): ссылка на страницу index+2.
-local function hasNextCatalog(html, index)
-	local pageLinks = html_select(html, "ul.pagination a[href]")
+local function hasNextCatalog(doc, index)
+	local pageLinks = doc:select("ul.pagination a[href]")
 	local target = "-" .. tostring(index + 1) .. ".html"
 	for _, l in ipairs(pageLinks) do
-		if string_ends_with(l.href or "", target) then
+		if string_ends_with(l:attr("href") or "", target) then
 			return true
 		end
 	end
@@ -100,8 +95,9 @@ function getCatalogList(index)
 	local url = baseUrl .. "list/all/all-onclick-" .. tostring(page) .. ".html"
 	local r = http_get(url)
 	if not r.success then return { items = {}, hasNext = false } end
-	local res = parseItems(r.body)
-	res.hasNext = hasNextCatalog(r.body, page)
+	local doc = r:toHtml()
+	local res = parseItems(doc)
+	res.hasNext = hasNextCatalog(doc, page)
 	return res
 end
 
@@ -114,9 +110,8 @@ function getCatalogSearch(index, query)
 	local r = http_post(url, "show=title&tempid=1&tbname=news&keyboard=" .. url_encode(query),
 		{ headers = { ["Content-Type"] = "application/x-www-form-urlencoded" } })
 	if not r.success then return { items = {}, hasNext = false } end
-	-- Движок следует 307-редиректу: r.body уже содержит страницу результатов
-	-- (/e/search/result/?searchid=N). Если нет — пробуем распарсить body напрямую.
-	local res = parseItems(r.body)
+	local doc = r:toHtml()
+	local res = parseItems(doc)
 	res.hasNext = false
 	return res
 end
@@ -124,37 +119,38 @@ end
 -- ── Детали книги ──
 
 function getBookTitle(bookUrl)
-	local html = fetchPage(bookUrl)
-	if not html then return nil end
-	local el = html_select_first(html, "h1.novel-title")
-	return el and string_clean(html_text(el.html)) or nil
+	local doc = fetchBookDoc(bookUrl)
+	if not doc then return nil end
+	local el = doc:selectFirst("h1.novel-title")
+	return el and string_clean(el:text()) or nil
 end
 
 function getBookCoverImageUrl(bookUrl)
-	local html = fetchPage(bookUrl)
-	if not html then return nil end
-	local img = html_select_first(html, ".cover img")
+	local doc = fetchBookDoc(bookUrl)
+	if not doc then return nil end
+	local img = doc:selectFirst(".cover img")
 	if not img then return nil end
-	local cover = html_attr(html, ".cover img", "data-src")
-	if cover == "" or not cover then cover = html_attr(html, ".cover img", "src") end
+	local cover = img:attr("data-src")
+	if cover == "" then cover = img:attr("src") end
 	return cover ~= "" and absUrl(cover) or nil
 end
 
 function getBookDescription(bookUrl)
-	local html = fetchPage(bookUrl)
-	if not html then return nil end
-	local el = html_select_first(html, "p.description")
-	if not el then el = html_select_first(html, ".summary .content") end
-	return el and string_trim(html_text(el.html)) or nil
+	local doc = fetchBookDoc(bookUrl)
+	if not doc then return nil end
+	local el = doc:selectFirst("p.description")
+	if not el then el = doc:selectFirst(".summary .content") end
+	return el and string_trim(el:text()) or nil
 end
 
 function getBookGenres(bookUrl)
-	local html = fetchPage(bookUrl)
-	if not html then return nil end
-	local tags = html_select(html, ".categories ul li a.property-item")
+	local doc = fetchBookDoc(bookUrl)
+	if not doc then return nil end
+	local tags = doc:select(".categories ul li a.property-item")
 	local genres = {}
 	for _, t in ipairs(tags) do
-		table.insert(genres, string_clean(html_text(t.html)))
+		local val = string_clean(t:text())
+		if val ~= "" then table.insert(genres, val) end
 	end
 	return #genres > 0 and genres or nil
 end
@@ -162,44 +158,38 @@ end
 -- ── Status / Last update ──
 
 function getBookStatus(bookUrl)
-	local html = fetchPage(bookUrl)
-	if not html then return nil end
-	local el = html_select_first(html, ".header-stats span:nth-child(2) strong")
-	return el and string_clean(html_text(el.html)) or nil
+	local doc = fetchBookDoc(bookUrl)
+	if not doc then return nil end
+	local el = doc:selectFirst(".header-stats span:nth-child(2) strong")
+	return el and string_clean(el:text()) or nil
 end
 
 function getBookLastUpdate(bookUrl)
-	local html = fetchPage(bookUrl)
-	if not html then return nil end
-	-- На странице книги нет отдельной даты книги; последняя выпущенная глава
-	-- (последний элемент встроенного списка) — дата обновления книги.
-	local times = html_select(html, "ul.chapter-list time.chapter-update")
+	local doc = fetchBookDoc(bookUrl)
+	if not doc then return nil end
+	local times = doc:select("ul.chapter-list time.chapter-update")
 	if #times == 0 then return nil end
 	local last = times[#times]
-	local rel = html_text(last.html)
-	return normalizeUpdateDate(rel)
+	return normalizeUpdateDate(string_trim(last:text()))
 end
 
 -- ── Список глав (parsePage, AJAX fy.php) ──
 
--- Кэш числа страниц глав по bookUrl (считается один раз на первой странице).
 local _totalPagesCache = {}
 
 function parsePage(bookUrl, page)
 	local slug = getSlug(bookUrl)
 	if not slug then return { chapters = {}, totalPages = 1 } end
 
-	-- Число страниц берём один раз со страницы книги (ссылка ">>").
 	if not _totalPagesCache[bookUrl] then
-		local br = http_get(bookUrl)
-		if br.success then
-			local nextLinks = html_select(br.body, "ul.pagination a[href]")
+		local doc = fetchBookDoc(bookUrl)
+		if doc then
+			local nextLinks = doc:select("ul.pagination a[href]")
 			local totalPages = 1
 			for _, l in ipairs(nextLinks) do
-				local txt = html_text(l.html)
-				local href = l.href or ""
+				local txt = l:text()
+				local href = l:attr("href") or ""
 				if string_trim(txt) == ">>" and string.find(href, "fy.php") then
-					-- string.match возвращает число страниц как строку (не таблицу).
 					local num = tonumber(string.match(href, "page=(%d+)"))
 					if num then totalPages = num + 1 end
 				end
@@ -211,19 +201,19 @@ function parsePage(bookUrl, page)
 	end
 	local totalPages = _totalPagesCache[bookUrl]
 
-	-- fy.php индексируется с 0: страница 1 движка -> page=0.
 	local sitePage = page - 1
 	local url = baseUrl .. "e/extend/fy.php?page=" .. tostring(sitePage) .. "&wjm=" .. slug
 	local r = http_get(url, { headers = { ["X-Requested-With"] = "XMLHttpRequest", Accept = "text/html" } })
 	if not r.success then return { chapters = {}, totalPages = totalPages } end
+	local doc = r:toHtml()
 
 	local chapters = {}
-	local links = html_select(r.body, "ul.chapter-list li a[href]")
+	local links = doc:select("ul.chapter-list li a[href]")
 	for _, a in ipairs(links) do
-		local title = html_select_first(a.html, "strong.chapter-title")
+		local title = a:selectFirst("strong.chapter-title")
 		table.insert(chapters, {
-			title = title and string_clean(title.text) or "",
-			url = absUrl(a.href),
+			title = title and string_clean(title:text()) or "",
+			url = absUrl(a:attr("href")),
 		})
 	end
 	return { chapters = chapters, totalPages = totalPages }
@@ -346,7 +336,8 @@ function getCatalogFiltered(index, filters)
 	local url = baseUrl .. "list/" .. genre .. "/" .. status .. "-" .. sort .. "-" .. tostring(page) .. ".html"
 	local r = http_get(url)
 	if not r.success then return { items = {}, hasNext = false } end
-	local res = parseItems(r.body)
-	res.hasNext = hasNextCatalog(r.body, page)
+	local doc = r:toHtml()
+	local res = parseItems(doc)
+	res.hasNext = hasNextCatalog(doc, page)
 	return res
 end
