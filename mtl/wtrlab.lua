@@ -3,7 +3,7 @@
 -- ── Metadata ───────────────────────────────────────────────────────────────
 id = "wtrlab"
 name = "WTR-LAB"
-version = "1.1.11"
+version = "1.1.12"
 baseUrl = "https://wtr-lab.com/"
 language = "MTL"
 icon = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/wtr-lab.png"
@@ -78,11 +78,13 @@ local function fetchPage(url)
 end
 
 -- Rating from the metrics block "Rating ★ 3.9 (563)" (book page + catalog cards)
-local function extractRating(html)
-    for _, el in ipairs(html_select(html, "div.items-center.text-center")) do
-        local label = html_select_first(el.html, "span[translate='no']")
-        if label and string_trim(label.text) == "Rating" then
-            local m = regex_match(html_text(el.html), "([\\d.]+)")
+local function extractRating(doc)
+    if not doc then return nil end
+    if type(doc) == "string" then doc = html_parse(doc) end
+    for _, el in ipairs(doc:select("div.items-center.text-center")) do
+        local label = el:selectFirst("span[translate='no']")
+        if label and string_trim(label:text()) == "Rating" then
+            local m = regex_match(el:text(), "([\\d.]+)")
             if m and m[1] then
                 return m[1]
             end
@@ -1554,13 +1556,14 @@ function getChapterListHash(bookUrl)
         return nil
     end
     local chapterCount = nil
-    for _, block in ipairs(html_select(r.body, "div.items-center.text-center")) do
-        local label = html_select_first(block.html, "span[translate='no']")
-        if label and string_trim(label.text) == "Chapters" then
+    local doc = r:toHtml()
+    for _, block in ipairs(doc:select("div.items-center.text-center")) do
+        local label = block:selectFirst("span[translate='no']")
+        if label and string_trim(label:text()) == "Chapters" then
             -- The block is: <span translate="no">Chapters</span><span translate="no">753</span>
             -- (both spans carry translate='no', so selecting the first span returns
             -- the LABEL — extract the number from the block text instead)
-            local m = regex_match(html_text(block.html), "(\\d+)")
+            local m = regex_match(block:text(), "(\\d+)")
             if m and m[1] then
                 chapterCount = m[1]
                 break

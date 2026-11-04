@@ -186,7 +186,7 @@
 -- collides with this one because sources resolve by baseUrl.
 id       = "novel543"
 name     = "Novel543"
-version  = "1.0.5"
+version  = "1.0.6"
 baseUrl  = "https://www.novel543.com/"
 language = "zh"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/novel543.png"
@@ -840,25 +840,28 @@ end
 local function parseListPage(r)
   local items = {}
   if not r or not r.success then return { items = items, hasNext = false } end
-  for _, li in ipairs(html_select(r.body, "ul.list li.media")) do
-    local titleEl = html_select_first(li.html, "div.media-content h3 a")
-    local bookUrl = absUrl(html_attr(li.html, "div.media-left a", "href"))
-    local cover   = absUrl(html_attr(li.html, "div.media-left img", "src"))
+  local doc = r:toHtml()
+  for _, li in ipairs(doc:select("ul.list li.media")) do
+    local titleEl = li:selectFirst("div.media-content h3 a")
+    local aEl = li:selectFirst("div.media-left a")
+    local imgEl = li:selectFirst("div.media-left img")
+    local bookUrl = aEl and absUrl(aEl:attr("href")) or ""
+    local cover   = imgEl and absUrl(imgEl:attr("src")) or ""
     if titleEl and bookUrl ~= "" then
       local item = {
-        title = string_clean(titleEl.text),
+        title = string_clean(titleEl:text()),
         url   = bookUrl,
         cover = cover
       }
       -- booklist cards: "共4本書" in one of the p.desc lines
-      for _, p in ipairs(html_select(li.html, "p.desc")) do
-        local c = string.match(p.text or "", "(%d+)本書")
+      for _, p in ipairs(li:select("p.desc")) do
+        local c = string.match(p:text() or "", "(%d+)本書")
         if c then item.count = tonumber(c) end
       end
       table.insert(items, item)
     end
   end
-  local hasNext = #html_select(r.body, "li.next.pagination-link:not(.disabled)") > 0
+  local hasNext = #doc:select("li.next.pagination-link:not(.disabled)") > 0
   return { items = items, hasNext = hasNext }
 end
 
@@ -1393,15 +1396,17 @@ function getChapterList(bookUrl)
   if isShudanUrl(bookUrl) then
     local r = fetchPageCached(bookUrl)
     if not r or not r.success then return {} end
+    local doc = r:toHtml()
     local chapters = {}
-    for _, li in ipairs(html_select(r.body, "ul.list li.media")) do
-      local titleEl = html_select_first(li.html, "div.media-content h3 a")
-      local href    = html_attr(li.html, "div.media-left a", "href")
-      if titleEl and href and href ~= "" then
-        local title = string_clean(titleEl.text)
-        local scoreEl = html_select_first(li.html, "span.score")
+    for _, li in ipairs(doc:select("ul.list li.media")) do
+      local titleEl = li:selectFirst("div.media-content h3 a")
+      local aEl     = li:selectFirst("div.media-left a")
+      local href    = aEl and aEl:attr("href") or ""
+      if titleEl and href ~= "" then
+        local title = string_clean(titleEl:text())
+        local scoreEl = li:selectFirst("span.score")
         if scoreEl then
-          local s = string.match(scoreEl.text or "", "(%d+%.?%d*)")
+          local s = string.match(scoreEl:text() or "", "(%d+%.?%d*)")
           if s then title = title .. " (" .. s .. "/10)" end
         end
         table.insert(chapters, { title = title, url = absUrl(href) })

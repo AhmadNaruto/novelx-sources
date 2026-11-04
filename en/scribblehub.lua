@@ -1,10 +1,23 @@
 -- ── Метаданные ────────────────────────────────────────────────────────────────
 id       = "scribblehub"
 name     = "ScribbleHub"
-version  = "1.0.5"
+version  = "1.1.0"
 baseUrl  = "https://www.scribblehub.com/"
 language = "en"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/scribblehub.png"
+
+local _bookDocCache = {}
+
+local function fetchBookDoc(url)
+  if _bookDocCache[url] then return _bookDocCache[url] end
+  local r = http_get(url)
+  if r.success then
+    local doc = r:toHtml()
+    _bookDocCache[url] = doc
+    return doc
+  end
+  return nil
+end
 
 -- ── Хелперы ───────────────────────────────────────────────────────────────────
 
@@ -26,6 +39,24 @@ local function applyStandardContentTransforms(text)
   return text
 end
 
+local function parseCards(doc)
+  if not doc then return {} end
+  local items = {}
+  for _, card in ipairs(doc:select(".search_main_box")) do
+    local titleEl = card:selectFirst(".search_title a")
+    if titleEl then
+      local bookUrl = absUrl(titleEl:attr("href"))
+      local img = card:selectFirst(".search_img img")
+      local cover = img and (img:attr("src") or img:attr("data-src")) or ""
+      local t = string_clean(titleEl:text())
+      if bookUrl ~= "" and t ~= "" then
+        table.insert(items, { title = t, url = bookUrl, cover = absUrl(cover) })
+      end
+    end
+  end
+  return items
+end
+
 -- ── Каталог ───────────────────────────────────────────────────────────────────
 
 function getCatalogList(index)
@@ -34,20 +65,7 @@ function getCatalogList(index)
 
   local r = http_get(url)
   if not r.success then return { items = {}, hasNext = false } end
-
-  local items = {}
-  for _, card in ipairs(html_select(r.body, ".search_main_box")) do
-    local titleEl = html_select_first(card.html, ".search_title a")
-    if titleEl then
-      local bookUrl = absUrl(titleEl.href)
-      local cover   = html_attr(card.html, ".search_img img", "src")
-      local t = string_clean(titleEl.text)
-      if bookUrl ~= "" and t ~= "" then
-        table.insert(items, { title = t, url = bookUrl, cover = absUrl(cover) })
-      end
-    end
-  end
-
+  local items = parseCards(r:toHtml())
   return { items = items, hasNext = #items > 0 }
 end
 
@@ -65,48 +83,35 @@ function getCatalogSearch(index, query)
 
   local r = http_get(url)
   if not r.success then return { items = {}, hasNext = false } end
-
-  local items = {}
-  for _, card in ipairs(html_select(r.body, ".search_main_box")) do
-    local titleEl = html_select_first(card.html, ".search_title a")
-    if titleEl then
-      local bookUrl = absUrl(titleEl.href)
-      local cover   = html_attr(card.html, ".search_img img", "src")
-      local t = string_clean(titleEl.text)
-      if bookUrl ~= "" and t ~= "" then
-        table.insert(items, { title = t, url = bookUrl, cover = absUrl(cover) })
-      end
-    end
-  end
-
+  local items = parseCards(r:toHtml())
   return { items = items, hasNext = #items > 0 }
 end
 
 -- ── Детали книги ──────────────────────────────────────────────────────────────
 
 function getBookTitle(bookUrl)
-  local r = http_get(bookUrl)
-  if not r.success then return nil end
-  local el = html_select_first(r.body, "div.fic_title")
-  if el then return string_clean(el.text) end
-  return nil
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  local el = doc:selectFirst("div.fic_title")
+  return el and string_clean(el:text()) or nil
 end
 
 function getBookCoverImageUrl(bookUrl)
-  local r = http_get(bookUrl)
-  if not r.success then return nil end
-  local src = html_attr(r.body, ".fic_image img", "src")
-  if src == "" then src = html_attr(r.body, ".novel-cover img", "src") end
-  if src ~= "" then return absUrl(src) end
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  local img = doc:selectFirst(".fic_image img, .novel-cover img")
+  if not img then return nil end
+  local src = img:attr("src")
+  if not src or src == "" then src = img:attr("data-src") end
+  if src and src ~= "" then return absUrl(src) end
   return nil
 end
 
 function getBookDescription(bookUrl)
-  local r = http_get(bookUrl)
-  if not r.success then return nil end
-  local el = html_select_first(r.body, ".wi_fic_desc")
-  if el then return string_trim(el.text) end
-  return nil
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  local el = doc:selectFirst(".wi_fic_desc")
+  return el and string_trim(el:text()) or nil
 end
 
 -- ── Список глав (POST AJAX) ───────────────────────────────────────────────────
@@ -137,10 +142,11 @@ function getChapterList(bookUrl)
     return {}
   end
 
+  local doc = r:toHtml()
   local chapters = {}
-  for _, a in ipairs(html_select(r.body, ".toc_w a[href]")) do
-    local chUrl = absUrl(a.href)
-    local t = string_trim(a.text)
+  for _, a in ipairs(doc:select(".toc_w a[href]")) do
+    local chUrl = absUrl(a:attr("href"))
+    local t = string_trim(a:text())
     if chUrl ~= "" then
       table.insert(chapters, { title = t, url = chUrl })
     end
@@ -155,10 +161,10 @@ end
 -- ── Хэш для обновлений ────────────────────────────────────────────────────────
 
 function getChapterListHash(bookUrl)
-  local r = http_get(bookUrl)
-  if not r.success then return nil end
-  local el = html_select_first(r.body, ".fic_stats span.st_item")
-  if el then return string_clean(el.text) end
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  local el = doc:selectFirst(".fic_stats span.st_item")
+  if el then return string_clean(el:text()) end
   return nil
 end
 
@@ -173,12 +179,12 @@ end
 -- ── Жанры на странице книги ───────────────────────────────────────────────────
 
 function getBookGenres(bookUrl)
-  local r = http_get(bookUrl)
-  if not r.success then return {} end
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return {} end
 
   local genres = {}
-  for _, a in ipairs(html_select(r.body, ".fic_genre")) do
-    local label = string_trim(a.text)
+  for _, a in ipairs(doc:select(".fic_genre")) do
+    local label = string_trim(a:text())
     if label ~= "" then table.insert(genres, label) end
   end
   return genres
@@ -209,11 +215,11 @@ end
 
 -- Статус книги: берём только слово(а) до « - Updated», иначе nil.
 function getBookStatus(bookUrl)
-  local r = http_get(bookUrl)
-  if not r.success then return nil end
-  local el = html_select_first(r.body, "span.rnd_stats + span")
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  local el = doc:selectFirst("span.rnd_stats + span")
   if not el then return nil end
-  local txt = string_clean(el.text)
+  local txt = string_clean(el:text())
   local status = string.match(txt, "^(.-)%s*%-%s*Updated")
   if not status then return nil end
   return string_clean(status)
@@ -225,11 +231,11 @@ end
 -- «Last updated:» движок через селектор [title^=...] не выбирает, поэтому
 -- берём дату из текста внешнего span регуляркой и нормализуем в YYYY-MM-DD.
 function getBookLastUpdate(bookUrl)
-  local r = http_get(bookUrl)
-  if not r.success then return nil end
-  local el = html_select_first(r.body, "span.rnd_stats + span")
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  local el = doc:selectFirst("span.rnd_stats + span")
   if not el then return nil end
-  local raw = string.match(string_clean(el.text),
+  local raw = string.match(string_clean(el:text()),
                             "Updated%s+(%a%a%a%s+%d+,%s+%d%d%d%d)")
   return normalizeDate(raw)
 end
@@ -391,19 +397,6 @@ function getCatalogFiltered(index, filters)
 
   local r = http_get(url)
   if not r.success then return { items = {}, hasNext = false } end
-
-  local items = {}
-  for _, card in ipairs(html_select(r.body, ".search_main_box")) do
-    local titleEl = html_select_first(card.html, ".search_title a")
-    if titleEl then
-      local bookUrl = absUrl(titleEl.href)
-      local cover   = html_attr(card.html, ".search_img img", "src")
-      local t = string_clean(titleEl.text)
-      if bookUrl ~= "" and t ~= "" then
-        table.insert(items, { title = t, url = bookUrl, cover = absUrl(cover) })
-      end
-    end
-  end
-
+  local items = parseCards(r:toHtml())
   return { items = items, hasNext = #items > 0 }
 end

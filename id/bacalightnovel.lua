@@ -302,23 +302,7 @@ function getCatalogFiltered(index, filters)
   local r = http_get(url)
   if not r.success then return { items = {}, hasNext = false } end
 
-  local items = {}
-  for _, article in ipairs(html_select(r.body, ".listupd .maindet")) do
-    local a = html_select_first(article.html, ".mdthumb a")
-    if a then
-      local bookUrl = absUrl(a.href)
-      local cover   = html_attr(article.html, ".mdthumb img", "src")
-      if cover == "" then cover = html_attr(article.html, ".mdthumb img", "data-src") end
-      local titleEl = html_select_first(article.html, ".mdinfo h2 a")
-      local title   = titleEl and string_clean(titleEl.text) or ""
-      -- рейтинг из соседнего блока .mdinfodet .mdminf (шкала 10 → явно /10)
-      local rEl     = html_select_first(article.html, ".mdinfodet .mdminf")
-      local rating  = rEl and ("Rating: " .. string_clean(rEl.text) .. "/10") or nil
-      if bookUrl ~= "" and title ~= "" then
-        table.insert(items, { title = title, url = bookUrl, cover = absUrl(cover), rating = rating })
-      end
-    end
-  end
-
+  local doc = r:toHtml()
+  local items = parseCatalogItems(doc, false)
   return { items = items, hasNext = #items > 0 }
 end

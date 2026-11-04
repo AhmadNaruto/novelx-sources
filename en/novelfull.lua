@@ -1,6 +1,6 @@
 id       = "novelfull"
 name     = "NovelFull"
-version  = "1.2.0"
+version  = "1.3.0"
 baseUrl  = "https://novelfull.net/"
 language = "en"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/novelfull.png"
@@ -15,13 +15,15 @@ local function absUrl(href)
 end
 
 -- ponytail: кэш страницы книги — движок дёргает 4+ функции деталей параллельно
-local _pageCache = {}
+local _bookDocCache = {}
 
-local function fetchBookPage(url)
-    if _pageCache[url] then return _pageCache[url] end
+local function fetchBookDoc(url)
+    if _bookDocCache[url] then return _bookDocCache[url] end
     local r = http_get(url)
-    if r.success then _pageCache[url] = r.body; return r.body end
-    return nil
+    if not r.success then return nil end
+    local doc = r:toHtml()
+    if doc then _bookDocCache[url] = doc end
+    return doc
 end
 
 local function applyStandardContentTransforms(text)
@@ -112,17 +114,22 @@ end
 -- Реальная вёрстка (novelfull.net, проверено на живой странице):
 -- список в .col-truyen-main .ul-list1, карточка = .li-row,
 -- заголовок в .txt h3.tit a, обложка (relative) в .pic img.
-local function buildCatalogItems(body)
+local function buildCatalogItems(doc)
+    if not doc then return {} end
     local items = {}
-    for _, card in ipairs(html_select(body, ".col-truyen-main .ul-list1 .li-row")) do
-        local a = html_select_first(card.html, ".txt h3.tit a")
-        if a and a.href and a.href ~= "" then
-            local cover = html_attr(card.html, ".pic img", "src")
-            table.insert(items, {
-                title = string_clean(a.text),
-                url   = absUrl(a.href),
-                cover = absUrl(cover),
-            })
+    for _, card in ipairs(doc:select(".col-truyen-main .ul-list1 .li-row")) do
+        local a = card:selectFirst(".txt h3.tit a")
+        if a then
+            local href = a.href or a:attr("href") or ""
+            if href ~= "" then
+                local img = card:selectFirst(".pic img")
+                local cover = img and (img:attr("src") or img.src) or ""
+                table.insert(items, {
+                    title = string_clean(a:text()),
+                    url   = absUrl(href),
+                    cover = absUrl(cover),
+                })
+            end
         end
     end
     upgradeCovers(items)
@@ -137,7 +144,8 @@ function getCatalogList(index)
     local r = http_get(url)
     if not r.success then return { items = {}, hasNext = false } end
 
-    local items = buildCatalogItems(r.body)
+    local doc = r:toHtml()
+    local items = buildCatalogItems(doc)
     return { items = items, hasNext = #items == 22 }
 end
 
@@ -151,17 +159,18 @@ function getCatalogSearch(index, query)
     local r = http_get(url)
     if not r.success then return { items = {}, hasNext = false } end
 
-    local items = buildCatalogItems(r.body)
+    local doc = r:toHtml()
+    local items = buildCatalogItems(doc)
     return { items = items, hasNext = #items == 22 }
 end
 
 -- ── Детали книги ──────────────────────────────────────────────────────────────
 
 function getBookTitle(bookUrl)
-    local html = fetchBookPage(bookUrl)
-    if not html then return nil end
-    local el = html_select_first(html, "h1.tit")
-    return el and string_clean(el.text) or nil
+    local doc = fetchBookDoc(bookUrl)
+    if not doc then return nil end
+    local el = doc:selectFirst("h1.tit")
+    return el and string_clean(el:text()) or nil
 end
 
 function getBookCoverImageUrl(bookUrl)
@@ -183,17 +192,18 @@ function getBookCoverImageUrl(bookUrl)
         end
     end
 
-    local html = fetchBookPage(bookUrl)
-    if not html then return nil end
-    local cover = html_attr(html, ".m-book1 img", "src")
+    local doc = fetchBookDoc(bookUrl)
+    if not doc then return nil end
+    local img = doc:selectFirst(".m-book1 img")
+    local cover = img and (img:attr("src") or img.src) or ""
     return (cover ~= "" and absUrl(cover)) or nil
 end
 
 function getBookDescription(bookUrl)
-    local html = fetchBookPage(bookUrl)
-    if not html then return nil end
-    local el = html_select_first(html, "#novel-summary-inner")
-    return el and string_trim(el.text) or nil
+    local doc = fetchBookDoc(bookUrl)
+    if not doc then return nil end
+    local el = doc:selectFirst("#novel-summary-inner")
+    return el and string_trim(el:text()) or nil
 end
 
 -- ── Список глав (parsePage, пачками через AJAX) ───────────────────────────────
@@ -233,11 +243,13 @@ end
 local function parseChapters(jsonBody)
     local data = json_parse(jsonBody)
     if not data or not data.html then return {} end
+    local doc = html_parse(data.html)
+    if not doc then return {} end
     local chapters = {}
-    for _, a in ipairs(html_select(data.html, "a[href*='/chapter-']")) do
-        local title = a.title or ""
-        if title == "" then title = a.text end
-        local chUrl = absUrl(a.href)
+    for _, a in ipairs(doc:select("a[href*='/chapter-']")) do
+        local title = a.title or a:attr("title") or ""
+        if title == "" then title = a:text() end
+        local chUrl = absUrl(a.href or a:attr("href"))
         if chUrl ~= "" then
             table.insert(chapters, { title = string_clean(title), url = chUrl })
         end
@@ -290,20 +302,22 @@ function parsePage(bookUrl, page)
     end
 
     -- Холодный путь: novelId и число страниц со страницы книги.
-    local html = fetchBookPage(bookUrl)
-    if not html then
+    local doc = fetchBookDoc(bookUrl)
+    if not doc then
         log_error("novelfull: parsePage failed to load " .. bookUrl)
         return { chapters = {}, totalPages = 1 }
     end
 
-    local novelId = html_attr(html, "#list-chapter", "data-novel-id")
-    if novelId == "" then novelId = html_attr(html, "#rating", "data-novel-id") end
+    local listEl = doc:selectFirst("#list-chapter")
+    local ratingEl = doc:selectFirst("#rating")
+    local novelId = listEl and (listEl:attr("data-novel-id") or "") or ""
+    if novelId == "" and ratingEl then novelId = ratingEl:attr("data-novel-id") or "" end
     if novelId == "" then
         log_error("novelfull: novelId not found at " .. bookUrl)
         return { chapters = {}, totalPages = 1 }
     end
 
-    local totalPages = tonumber(html_attr(html, "#list-chapter", "data-total-page")) or 1
+    local totalPages = listEl and tonumber(listEl:attr("data-total-page")) or 1
 
     -- Первый вызов (первичная загрузка): тянем все страницы пачками.
     if page == 1 and totalPages > 1 then
@@ -332,17 +346,17 @@ function getChapterText(html, url)
     local cleaned = html_remove(html, "script", ".ads")
     local el = html_select_first(cleaned, "#chapter-content")
     if not el then return "" end
-    return applyStandardContentTransforms(html_text(el.html))
+    return applyStandardContentTransforms(html_text(el))
 end
 
 -- ── Жанры книги ───────────────────────────────────────────────────────────────
 
 function getBookGenres(bookUrl)
-  local html = fetchBookPage(bookUrl)
-  if not html then return {} end
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return {} end
   local genres = {}
-  for _, a in ipairs(html_select(html, ".m-info .item a.a1[href^='/genre/']")) do
-    local g = string_trim(a.text)
+  for _, a in ipairs(doc:select(".m-info .item a.a1[href^='/genre/']")) do
+    local g = string_trim(a:text())
     if g ~= "" then table.insert(genres, g) end
   end
   return genres
@@ -351,14 +365,14 @@ end
 -- ── Статус / Дата обновления ───────────────────────────────────────────────────
 
 function getBookStatus(bookUrl)
-  local html = fetchBookPage(bookUrl)
-  if not html then return nil end
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
   -- Блок статуса: <div class="item">...<span title="Status">...</span><a>OnGoing</a>
-  for _, item in ipairs(html_select(html, ".item")) do
-    if html_select_first(item.html, "span[title='Status']") then
-      local a = html_select_first(item.html, "a")
+  for _, item in ipairs(doc:select(".item")) do
+    if item:selectFirst("span[title='Status']") then
+      local a = item:selectFirst("a")
       if a then
-        local t = string_clean(a.text)
+        local t = string_clean(a:text())
         if t == "OnGoing" then return "Ongoing" end
         return t
       end
@@ -379,13 +393,13 @@ local unitSecs = {
 }
 
 function getBookLastUpdate(bookUrl)
-  local html = fetchBookPage(bookUrl)
-  if not html then return nil end
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
   -- Блок ".lastupdate": "[ Updated 19 hours ago ]" — относительная дата
   -- (абсолютной даты на странице книги novelfull.net нет)
-  local el = html_select_first(html, ".lastupdate")
+  local el = doc:selectFirst(".lastupdate")
   if not el then return nil end
-  local raw = string_clean(el.text)
+  local raw = string_clean(el:text())
   local n, unit = string.match(raw, "(%d+)%s+(%w+)%s+ago")
   if not n and string.match(raw, "just now") then
     return os.date("%Y-%m-%d")
@@ -470,6 +484,7 @@ function getCatalogFiltered(index, filters)
   local r = http_get(url)
   if not r.success then return { items = {}, hasNext = false } end
 
-  local items = buildCatalogItems(r.body)
+  local doc = r:toHtml()
+  local items = buildCatalogItems(doc)
   return { items = items, hasNext = #items == 22 }
 end

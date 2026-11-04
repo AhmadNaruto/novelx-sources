@@ -454,7 +454,7 @@ function getChapterText(html, url)
     if #pages == 0 then
         local container = html_select_first(body, "#readerarea, .reading-content, #chapter-content, .chapter-content")
         if container then
-            for _, img in ipairs(html_select(container.html, "img:not([src*='asura-images/covers/'])")) do
+            for _, img in ipairs(container:select("img:not([src*='asura-images/covers/'])")) do
                 local src = img.src
                 if src == "" then src = img:attr("data-src") end
                 src = absUrl(src)

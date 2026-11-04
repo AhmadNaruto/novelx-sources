@@ -1,18 +1,19 @@
 id       = "freewebnovel"
 name     = "FreeWebNovel"
-version  = "1.1.0"
+version  = "1.2.0"
 baseUrl  = "https://freewebnovel.com"
 language = "en"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/freewebnovel.png"
 
-local _pageCache = {}
+local _bookDocCache = {}
 
-local function fetchPage(url)
-  if _pageCache[url] then return _pageCache[url] end
+local function fetchBookDoc(url)
+  if _bookDocCache[url] then return _bookDocCache[url] end
   local r = http_get(url)
   if r.success then
-    _pageCache[url] = r.body
-    return r.body
+    local doc = r:toHtml()
+    _bookDocCache[url] = doc
+    return doc
   end
   return nil
 end
@@ -42,19 +43,23 @@ local function catalogUrl(basePath, page)
   return baseUrl .. "/" .. basePath .. "/" .. tostring(page)
 end
 
-local function parseItems(html)
+local function parseItems(doc)
+  if not doc then return {} end
   local items = {}
-  for _, row in ipairs(html_select(html, ".ul-list1 .li-row, .serach-result .li-row")) do
-    local titleEl = html_select_first(row.html, ".tit a")
+  for _, row in ipairs(doc:select(".ul-list1 .li-row, .serach-result .li-row")) do
+    local titleEl = row:selectFirst(".tit a")
     if titleEl then
-      local cover = absUrl(html_attr(row.html, ".pic img", "src"))
+      local imgEl = row:selectFirst(".pic img")
+      local cover = imgEl and (imgEl:attr("src") or imgEl:attr("data-src")) or ""
+      cover = absUrl(cover)
       -- Рейтинг из карточки (каталог, поиск, фильтры):
       -- <div class="core"><span>3.8</span></div>
-      local ratingEl = html_select_first(row.html, ".core span")
-      local rating = ratingEl and string_clean(ratingEl.text) or ""
+      local ratingEl = row:selectFirst(".core span")
+      local rating = ratingEl and string_clean(ratingEl:text()) or ""
+      local href = titleEl:attr("href")
       table.insert(items, {
-        title = string_clean(titleEl.text),
-        url   = absUrl(titleEl.href),
+        title = string_clean(titleEl:text()),
+        url   = absUrl(href),
         cover = cover,
         rating = rating
       })
@@ -69,7 +74,7 @@ function getCatalogList(index)
   -- результатов (most-popular и search-adv отдают максимум 100).
   local r = http_get(catalogUrl("sort/latest-release", page))
   if not r.success then return { items = {}, hasNext = false } end
-  local items = parseItems(r.body)
+  local items = parseItems(r:toHtml())
   return { items = items, hasNext = #items > 0 }
 end
 
@@ -78,46 +83,45 @@ function getCatalogSearch(index, query)
   local url = baseUrl .. "/search?keyword=" .. url_encode(query) .. "&page=" .. tostring(page)
   local r = http_get(url)
   if not r.success then return { items = {}, hasNext = false } end
-  local items = parseItems(r.body)
+  local items = parseItems(r:toHtml())
   return { items = items, hasNext = #items > 0 }
 end
 
 function getBookTitle(bookUrl)
-  local body = fetchPage(bookUrl)
-  if not body then return nil end
-  local el = html_select_first(body, "h1.tit")
-  return el and string_clean(el.text) or nil
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  local el = doc:selectFirst("h1.tit")
+  return el and string_clean(el:text()) or nil
 end
 
 function getBookCoverImageUrl(bookUrl)
-  local body = fetchPage(bookUrl)
-  if not body then return nil end
-  local src = html_attr(body, ".pic img", "src")
-  if not src or src == "" then
-    src = html_attr(body, ".pic img", "data-src")
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  local img = doc:selectFirst(".pic img, .books img, .m-imgtxt img")
+  if img then
+    local src = img:attr("src")
+    if not src or src == "" then src = img:attr("data-src") end
+    if src and src ~= "" then return absUrl(src) end
   end
-  if not src or src == "" then
-    src = html_attr(body, ".books img, .m-imgtxt img", "src")
-  end
-  return src ~= "" and absUrl(src) or nil
+  return nil
 end
 
 function getBookDescription(bookUrl)
-  local body = fetchPage(bookUrl)
-  if not body then return nil end
-  local el = html_select_first(body, ".m-desc .txt")
-  return el and string_trim(el.text) or nil
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  local el = doc:selectFirst(".m-desc .txt")
+  return el and string_trim(el:text()) or nil
 end
 
 function getBookGenres(bookUrl)
-  local body = fetchPage(bookUrl)
-  if not body then return {} end
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return {} end
   local genres = {}
-  for _, item in ipairs(html_select(body, ".m-imgtxt .txt .item")) do
-    local span = html_select_first(item.html, "span[title='Genre']")
+  for _, item in ipairs(doc:select(".m-imgtxt .txt .item")) do
+    local span = item:selectFirst("span[title='Genre']")
     if span then
-      for _, a in ipairs(html_select(item.html, ".right a")) do
-        local g = string_trim(a.text)
+      for _, a in ipairs(item:select(".right a")) do
+        local g = string_trim(a:text())
         if g ~= "" then table.insert(genres, g) end
       end
       break
@@ -132,15 +136,15 @@ end
 -- <div class="item"><span ... title="Status"></span>
 --   <div class="right"><span class="s1 s2"><a ...>OnGoing</a></span></div></div>
 function getBookStatus(bookUrl)
-  local body = fetchPage(bookUrl)
-  if not body then return nil end
-  for _, item in ipairs(html_select(body, ".m-imgtxt .txt .item")) do
-    local span = html_select_first(item.html, "span[title='Status']")
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  for _, item in ipairs(doc:select(".m-imgtxt .txt .item")) do
+    local span = item:selectFirst("span[title='Status']")
     if span then
-      local a = html_select_first(item.html, ".right a")
-      if a then return string_trim(a.text) end
-      local s = html_select_first(item.html, ".right span")
-      if s then return string_trim(s.text) end
+      local a = item:selectFirst(".right a")
+      if a then return string_trim(a:text()) end
+      local s = item:selectFirst(".right span")
+      if s then return string_trim(s:text()) end
       return nil
     end
   end
@@ -168,11 +172,11 @@ local function normalizeUpdateDate(raw)
 end
 
 function getBookLastUpdate(bookUrl)
-  local body = fetchPage(bookUrl)
-  if not body then return nil end
-  local el = html_select_first(body, ".lastupdate")
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  local el = doc:selectFirst(".lastupdate")
   if not el then return nil end
-  return normalizeUpdateDate(string_trim(el.text))
+  return normalizeUpdateDate(string_trim(el:text()))
 end
 
 -- ── Rating ──────────────────────────────────────────────────────────────
@@ -180,11 +184,11 @@ end
 -- Рейтинг книги со страницы книги: <p class="vote">3.8 / 5 ( 653 votes )</p>
 -- внутри .score. Извлекаем голое число (шкала 0-5).
 function getBookRating(bookUrl)
-  local r = http_get(bookUrl)
-  if not r.success then return nil end
-  local el = html_select_first(r.body, ".score .vote")
+  local doc = fetchBookDoc(bookUrl)
+  if not doc then return nil end
+  local el = doc:selectFirst(".score .vote")
   if not el then return nil end
-  local n = string.match(string_clean(el.text), "%d+%.?%d*")
+  local n = string.match(string_clean(el:text()), "%d+%.?%d*")
   return n or nil
 end
 
@@ -219,11 +223,12 @@ function parsePage(bookUrl, page)
   if not data then return { chapters = {}, totalPages = 1 } end
   local totalPages = tonumber(data.totalPage) or 1
   local chapters = {}
-  for _, a in ipairs(html_select(data.html, "a[href]")) do
-    local chUrl = absUrl(a.href)
+  local doc = html_parse(data.html)
+  for _, a in ipairs(doc:select("a[href]")) do
+    local chUrl = absUrl(a:attr("href"))
     if chUrl ~= "" then
       local title = a:attr("title")
-      if not title or title == "" then title = string_clean(a.text) end
+      if not title or title == "" then title = string_clean(a:text()) end
       table.insert(chapters, {
         title = string_clean(title),
         url   = chUrl
@@ -442,6 +447,6 @@ function getCatalogFiltered(index, filters)
 
   local r = http_get(baseUrl .. "/search-adv?" .. table.concat(parts, "&"))
   if not r.success then return { items = {}, hasNext = false } end
-  local items = parseItems(r.body)
+  local items = parseItems(r:toHtml())
   return { items = items, hasNext = #items > 0 }
 end

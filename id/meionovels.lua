@@ -1,6 +1,6 @@
 id       = "meionovels"
 name     = "MeioNovels"
-version  = "1.1.0"
+version  = "1.2.0"
 baseUrl  = "https://meionovels.com"
 language = "id"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/meionovels.png"
@@ -25,55 +25,54 @@ local function applyStandardContentTransforms(text)
     return text
 end
 
-local _pageCache = {}
+local _bookDocCache = {}
 
-local function fetchPage(url)
-    if _pageCache[url] then return _pageCache[url] end
+local function fetchBookDoc(url)
+    if _bookDocCache[url] then return _bookDocCache[url] end
     local r = http_get(url)
     if r.success then
-        _pageCache[url] = r.body
-        return r.body
+        local doc = r:toHtml()
+        _bookDocCache[url] = doc
+        return doc
     end
     return nil
 end
 
 -- ── Утилиты для парсинга ──────────────────────────────────────────────────────
 
-local function parseCoverSrc(body)
-    local cover = html_attr(body, ".summary_image img", "src")
-    if cover == "" then
-        cover = html_attr(body, ".tab-thumb img", "src")
-    end
-    if cover == "" then
-        cover = html_attr(body, ".c-image-hover img", "src")
-    end
-    return cover ~= "" and absUrl(cover) or nil
+local function parseCoverSrc(doc)
+    if not doc then return nil end
+    local img = doc:selectFirst(".summary_image img, .tab-thumb img, .c-image-hover img")
+    if not img then return nil end
+    local cover = img:attr("src")
+    if not cover or cover == "" then cover = img:attr("data-src") end
+    return cover and cover ~= "" and absUrl(cover) or nil
 end
 
-local function parseCatalogItems(body)
+local function parseCatalogItems(doc)
+    if not doc then return {} end
     local items = {}
-    for _, card in ipairs(html_select(body, ".c-tabs-item__content")) do
-        local titleEl = html_select_first(card.html, ".post-title h3.h4 a")
-        local cover   = html_attr(card.html, ".tab-thumb img", "src")
-        if cover == "" then
-            cover = html_attr(card.html, ".c-image-hover img", "src")
-        end
+    for _, card in ipairs(doc:select(".c-tabs-item__content")) do
+        local titleEl = card:selectFirst(".post-title h3.h4 a")
         if titleEl then
-            -- Рейтинг из карточки (шкала 0-5, голое число)
-            local rEl = html_select_first(card.html, '.post-total-rating .score')
+            local img = card:selectFirst(".tab-thumb img, .c-image-hover img")
+            local cover = img and (img:attr("src") or img:attr("data-src")) or ""
+            local rEl = card:selectFirst('.post-total-rating .score')
+            local href = titleEl:attr("href")
             table.insert(items, {
-                title  = string_clean(titleEl.text),
-                url    = absUrl(titleEl.href),
+                title  = string_clean(titleEl:text()),
+                url    = absUrl(href),
                 cover  = cover ~= "" and absUrl(cover) or nil,
-                rating = rEl and string_clean(rEl.text) or nil
+                rating = rEl and string_clean(rEl:text()) or nil
             })
         end
     end
     return items
 end
 
-local function hasNextPage(body)
-    local nextLink = html_select_first(body, ".nav-previous a")
+local function hasNextPage(doc)
+    if not doc then return false end
+    local nextLink = doc:selectFirst(".nav-previous a")
     return nextLink ~= nil
 end
 
@@ -86,8 +85,9 @@ function getCatalogList(index)
     local r = http_get(url)
     if not r.success then return { items = {}, hasNext = false } end
 
-    local items = parseCatalogItems(r.body)
-    return { items = items, hasNext = hasNextPage(r.body) }
+    local doc = r:toHtml()
+    local items = parseCatalogItems(doc)
+    return { items = items, hasNext = hasNextPage(doc) }
 end
 
 -- ── Поиск ─────────────────────────────────────────────────────────────────────
@@ -99,39 +99,40 @@ function getCatalogSearch(index, query)
     local r = http_get(url)
     if not r.success then return { items = {}, hasNext = false } end
 
-    local items = parseCatalogItems(r.body)
-    return { items = items, hasNext = hasNextPage(r.body) }
+    local doc = r:toHtml()
+    local items = parseCatalogItems(doc)
+    return { items = items, hasNext = hasNextPage(doc) }
 end
 
 -- ── Детали книги ──────────────────────────────────────────────────────────────
 
 function getBookTitle(bookUrl)
-    local body = fetchPage(bookUrl)
-    if not body then return nil end
-    local el = html_select_first(body, ".post-title h1")
-    return el and string_clean(el.text) or nil
+    local doc = fetchBookDoc(bookUrl)
+    if not doc then return nil end
+    local el = doc:selectFirst(".post-title h1")
+    return el and string_clean(el:text()) or nil
 end
 
 function getBookCoverImageUrl(bookUrl)
-    local body = fetchPage(bookUrl)
-    if not body then return nil end
-    return parseCoverSrc(body)
+    local doc = fetchBookDoc(bookUrl)
+    if not doc then return nil end
+    return parseCoverSrc(doc)
 end
 
 function getBookDescription(bookUrl)
-    local body = fetchPage(bookUrl)
-    if not body then return nil end
-    local el = html_select_first(body, ".description-summary .summary__content")
-    return el and string_trim(el.text) or nil
+    local doc = fetchBookDoc(bookUrl)
+    if not doc then return nil end
+    local el = doc:selectFirst(".description-summary .summary__content")
+    return el and string_trim(el:text()) or nil
 end
 
 function getBookGenres(bookUrl)
-    local body = fetchPage(bookUrl)
-    if not body then return {} end
+    local doc = fetchBookDoc(bookUrl)
+    if not doc then return {} end
 
     local genres = {}
-    for _, a in ipairs(html_select(body, ".genres-content a")) do
-        local label = string_trim(a.text)
+    for _, a in ipairs(doc:select(".genres-content a")) do
+        local label = string_trim(a:text())
         if label ~= "" then table.insert(genres, label) end
     end
     return genres
@@ -140,10 +141,10 @@ end
 -- ── Рейтинг ────────────────────────────────────────────────────────────────────
 
 function getBookRating(bookUrl)
-    local body = fetchPage(bookUrl)
-    if not body then return nil end
-    local el = html_select_first(body, ".post-total-rating .score")
-    return el and string_clean(el.text) or nil
+    local doc = fetchBookDoc(bookUrl)
+    if not doc then return nil end
+    local el = doc:selectFirst(".post-total-rating .score")
+    return el and string_clean(el:text()) or nil
 end
 
 -- ── Хэш списка глав (прямой запрос, не кэш!) ────────────────────────────────
@@ -152,14 +153,14 @@ function getChapterListHash(bookUrl)
     local r = http_get(bookUrl)
     if not r.success then return nil end
 
-    -- Берём количество глав из .post-content_item с h5="Chapters"
+    local doc = r:toHtml()
     local chapterCount = ""
-    for _, item in ipairs(html_select(r.body, ".post-content_item")) do
-        local heading = html_select_first(item.html, ".summary-heading h5")
-        if heading and string_trim(heading.text) == "Chapters" then
-            local content = html_select_first(item.html, ".summary-content")
+    for _, item in ipairs(doc:select(".post-content_item")) do
+        local heading = item:selectFirst(".summary-heading h5")
+        if heading and string_trim(heading:text()) == "Chapters" then
+            local content = item:selectFirst(".summary-content")
             if content then
-                chapterCount = string_trim(content.text)
+                chapterCount = string_trim(content:text())
             end
             break
         end
@@ -190,28 +191,35 @@ function getChapterList(bookUrl)
     if not r.success then return {} end
 
     local chapters = {}
+    local doc = r:toHtml()
 
     -- Парсим главы из AJAX-ответа (с учётом вложенности Volume > Chapter)
-    for _, li in ipairs(html_select(r.body, ".wp-manga-chapter")) do
-        local a = html_select_first(li.html, "a")
-        if a and a.href and a.href ~= "" then
-            table.insert(chapters, {
-                title = string_clean(a.text),
-                url   = absUrl(a.href)
-            })
+    for _, li in ipairs(doc:select(".wp-manga-chapter")) do
+        local a = li:selectFirst("a")
+        if a then
+            local href = a:attr("href")
+            if href and href ~= "" then
+                table.insert(chapters, {
+                    title = string_clean(a:text()),
+                    url   = absUrl(href)
+                })
+            end
         end
     end
 
     -- Если глав не нашлось через плоский список, пробуем вложенную структуру
     if #chapters == 0 then
-        for _, vol in ipairs(html_select(r.body, ".listing-chapters_wrap .has-child")) do
-            for _, li in ipairs(html_select(vol.html, ".wp-manga-chapter")) do
-                local a = html_select_first(li.html, "a")
-                if a and a.href and a.href ~= "" then
-                    table.insert(chapters, {
-                        title = string_clean(a.text),
-                        url   = absUrl(a.href)
-                    })
+        for _, vol in ipairs(doc:select(".listing-chapters_wrap .has-child")) do
+            for _, li in ipairs(vol:select(".wp-manga-chapter")) do
+                local a = li:selectFirst("a")
+                if a then
+                    local href = a:attr("href")
+                    if href and href ~= "" then
+                        table.insert(chapters, {
+                            title = string_clean(a:text()),
+                            url   = absUrl(href)
+                        })
+                    end
                 end
             end
         end
@@ -400,6 +408,7 @@ function getCatalogFiltered(index, filters)
     local r = http_get(url)
     if not r.success then return { items = {}, hasNext = false } end
 
-    local items = parseCatalogItems(r.body)
-    return { items = items, hasNext = hasNextPage(r.body) }
+    local doc = r:toHtml()
+    local items = parseCatalogItems(doc)
+    return { items = items, hasNext = hasNextPage(doc) }
 end

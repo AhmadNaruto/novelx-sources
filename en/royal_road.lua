@@ -1,10 +1,23 @@
 -- ── Метаданные ────────────────────────────────────────────────────────────────
 id       = "royal_road"
 name     = "Royal Road"
-version  = "1.1.7"
+version  = "1.2.0"
 baseUrl  = "https://www.royalroad.com"
 language = "en"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/royalroad.png"
+
+local _bookCache = {}
+
+local function fetchBook(url)
+  if _bookCache[url] then return _bookCache[url] end
+  local r = http_get(url)
+  if r.success then
+    local entry = { doc = r:toHtml(), body = r.body }
+    _bookCache[url] = entry
+    return entry
+  end
+  return nil
+end
 
 -- ── Хелперы ───────────────────────────────────────────────────────────────────
 
@@ -33,6 +46,39 @@ local function applyStandardContentTransforms(text)
   return text
 end
 
+local function parseCards(doc)
+  if not doc then return {} end
+  local items = {}
+  for _, card in ipairs(doc:select(".fiction-list-item")) do
+    local titleEl = card:selectFirst("h2 a")
+    if titleEl then
+      local bookUrl = absUrl(titleEl:attr("href"))
+      local img = card:selectFirst("img")
+      local cover = img and (img:attr("src") or img:attr("data-src")) or ""
+      -- Рейтинг из карточки: span.star[title="4.83"] либо div[aria-label="Rating: 4.83 out of 5"]
+      local star = card:selectFirst("span.star[title]")
+      local rating = star and star:attr("title") or ""
+      if rating == "" then
+        local ariaEl = card:selectFirst('div[aria-label^="Rating:"]')
+        local aria = ariaEl and ariaEl:attr("aria-label") or ""
+        if aria ~= "" then
+          local m = regex_match(aria, "([\\d.]+)")
+          rating = m[1] or ""
+        end
+      end
+      local item = {
+        title = string_clean(titleEl:text()),
+        url   = bookUrl,
+        cover = absUrl(cover)
+      }
+      -- Рейтинга в карточке нет ("Too Few Ratings") — ключ не добавляем (контракт)
+      if rating ~= "" then item.rating = rating end
+      table.insert(items, item)
+    end
+  end
+  return items
+end
+
 -- ── Каталог (best-rated, постраничный) ────────────────────────────────────────
 
 function getCatalogList(index)
@@ -45,33 +91,7 @@ function getCatalogList(index)
 
   local r = http_get(url)
   if not r.success then return { items = {}, hasNext = false } end
-
-  local items = {}
-  for _, card in ipairs(html_select(r.body, ".fiction-list-item")) do
-    local titleEl = html_select_first(card.html, "h2 a")
-    if titleEl then
-      local bookUrl = absUrl(titleEl.href)
-      local cover   = html_attr(card.html, "img", "src")
-      -- Рейтинг из карточки: span.star[title="4.83"] либо div[aria-label="Rating: 4.83 out of 5"]
-      local rating = html_attr(card.html, "span.star[title]", "title")
-      if rating == "" then
-        local aria = html_attr(card.html, 'div[aria-label^="Rating:"]', "aria-label")
-        if aria ~= "" then
-          local m = regex_match(aria, "([\\d.]+)")
-          rating = m[1] or ""
-        end
-      end
-      local item = {
-        title = string_clean(titleEl.text),
-        url   = bookUrl,
-        cover = absUrl(cover)
-      }
-      -- Рейтинга в карточке нет ("Too Few Ratings") — ключ не добавляем (контракт)
-      if rating ~= "" then item.rating = rating end
-      table.insert(items, item)
-    end
-  end
-
+  local items = parseCards(r:toHtml())
   return { items = items, hasNext = #items > 0 }
 end
 
@@ -83,76 +103,52 @@ function getCatalogSearch(index, query)
 
   local r = http_get(url)
   if not r.success then return { items = {}, hasNext = false } end
-
-  local items = {}
-  for _, card in ipairs(html_select(r.body, ".fiction-list-item")) do
-    local titleEl = html_select_first(card.html, "h2 a")
-    if titleEl then
-      local bookUrl = absUrl(titleEl.href)
-      local cover   = html_attr(card.html, "img", "src")
-      -- Рейтинг из карточки: span.star[title="4.83"] либо div[aria-label="Rating: 4.83 out of 5"]
-      local rating = html_attr(card.html, "span.star[title]", "title")
-      if rating == "" then
-        local aria = html_attr(card.html, 'div[aria-label^="Rating:"]', "aria-label")
-        if aria ~= "" then
-          local m = regex_match(aria, "([\\d.]+)")
-          rating = m[1] or ""
-        end
-      end
-      local item = {
-        title = string_clean(titleEl.text),
-        url   = bookUrl,
-        cover = absUrl(cover)
-      }
-      -- Рейтинга в карточке нет ("Too Few Ratings") — ключ не добавляем (контракт)
-      if rating ~= "" then item.rating = rating end
-      table.insert(items, item)
-    end
-  end
-
+  local items = parseCards(r:toHtml())
   return { items = items, hasNext = #items > 0 }
 end
 
 -- ── Детали книги ──────────────────────────────────────────────────────────────
 
 function getBookTitle(bookUrl)
-  local r = http_get(bookUrl)
-  if not r.success then return nil end
-  local el = html_select_first(r.body, "h1.font-white")
-  return el and string_clean(el.text) or nil
+  local b = fetchBook(bookUrl)
+  if not b or not b.doc then return nil end
+  local el = b.doc:selectFirst("h1.font-white")
+  return el and string_clean(el:text()) or nil
 end
 
 function getBookCoverImageUrl(bookUrl)
-  local r = http_get(bookUrl)
-  if not r.success then return nil end
-  local cover = html_attr(r.body, ".cover-art-container img[src]", "src")
-  if cover == "" then return nil end
+  local b = fetchBook(bookUrl)
+  if not b or not b.doc then return nil end
+  local el = b.doc:selectFirst(".cover-art-container img[src]")
+  if not el then return nil end
+  local cover = el:attr("src")
+  if not cover or cover == "" then return nil end
   return absUrl(cover)
 end
 
 function getBookDescription(bookUrl)
-  local r = http_get(bookUrl)
-  if not r.success then return nil end
-  local el = html_select_first(r.body, ".description")
-  return el and string_trim(el.text) or nil
+  local b = fetchBook(bookUrl)
+  if not b or not b.doc then return nil end
+  local el = b.doc:selectFirst(".description")
+  return el and string_trim(el:text()) or nil
 end
 
 -- ── Список глав (NONE — всё на странице книги) ────────────────────────────────
 
 function getChapterList(bookUrl)
-  local r = http_get(bookUrl)
-  if not r.success then
+  local b = fetchBook(bookUrl)
+  if not b or not b.doc then
     log_error("royalroad: getChapterList failed for " .. bookUrl)
     return {}
   end
 
   local chapters = {}
   -- Таблица глав: tr.chapter-row, первая ячейка содержит ссылку
-  for _, a in ipairs(html_select(r.body, "tr.chapter-row td:first-child a[href]")) do
-    local chUrl = absUrl(a.href)
+  for _, a in ipairs(b.doc:select("tr.chapter-row td:first-child a[href]")) do
+    local chUrl = absUrl(a:attr("href"))
     if chUrl ~= "" then
-      local title = a.title
-      if not title or title == "" then title = string_trim(a.text) end
+      local title = a:attr("title")
+      if not title or title == "" then title = string_trim(a:text()) end
       table.insert(chapters, { title = string_clean(title), url = chUrl })
     end
   end
@@ -163,11 +159,11 @@ end
 -- ── Хэш для обновлений ────────────────────────────────────────────────────────
 
 function getChapterListHash(bookUrl)
-  local r = http_get(bookUrl)
-  if not r.success then return nil end
+  local b = fetchBook(bookUrl)
+  if not b or not b.doc then return nil end
   -- Последняя метка (дата/номер) в заголовке portlet — меняется при новых главах
-  local el = html_select_first(r.body, ".portlet-title .actions .label")
-  return el and string_clean(el.text) or nil
+  local el = b.doc:selectFirst(".portlet-title .actions .label")
+  return el and string_clean(el:text()) or nil
 end
 
 -- ── Текст главы ───────────────────────────────────────────────────────────────
@@ -184,13 +180,13 @@ end
 -- ── Жанры на странице книги ───────────────────────────────────────────────────
 
 function getBookGenres(bookUrl)
-  local r = http_get(bookUrl)
-  if not r.success then return {} end
+  local b = fetchBook(bookUrl)
+  if not b or not b.doc then return {} end
 
   local genres = {}
   -- span.tags содержит ссылки на жанры/теги
-  for _, a in ipairs(html_select(r.body, "span.tags a")) do
-    local label = string_trim(a.text)
+  for _, a in ipairs(b.doc:select("span.tags a")) do
+    local label = string_trim(a:text())
     if label ~= "" then table.insert(genres, label) end
   end
   return genres
@@ -201,9 +197,10 @@ end
 -- Рейтинг книги со страницы книги: <span class="star" aria-label="4.83 stars">
 -- Только рейтинг, список глав не парсим (контракт lua-plugin-guide.md:188-192)
 function getBookRating(bookUrl)
-  local r = http_get(bookUrl)
-  if not r.success then return nil end
-  local label = html_attr(r.body, "span.star[aria-label]", "aria-label")
+  local b = fetchBook(bookUrl)
+  if not b or not b.doc then return nil end
+  local star = b.doc:selectFirst("span.star[aria-label]")
+  local label = star and star:attr("aria-label") or ""
   if label == "" then return nil end
   local m = regex_match(label, "([\\d.]+)")
   return m[1] and string_trim(m[1]) or nil
@@ -215,10 +212,10 @@ end
 -- Такой же класс у типа ("Original"/"Fanfiction") и тегов жанров в том же
 -- контейнере, поэтому берём по точному набору значений статуса.
 function getBookStatus(bookUrl)
-  local r = http_get(bookUrl)
-  if not r.success then return nil end
-  for _, span in ipairs(html_select(r.body, "span.label-sm.bg-blue-hoki")) do
-    local v = string_clean(span.text)
+  local b = fetchBook(bookUrl)
+  if not b or not b.doc then return nil end
+  for _, span in ipairs(b.doc:select("span.label-sm.bg-blue-hoki")) do
+    local v = string_clean(span:text())
     if v == "ONGOING" or v == "COMPLETED" or v == "DROPPED" or v == "HIATUS" or v == "STUB" then
       return v
     end
@@ -233,12 +230,9 @@ end
 -- совпадение (m.value, группы не экспонируются), поэтому берём фрагмент с
 -- ключом, а саму дату вырезаем через string.match (Lua-паттерн).
 function getBookLastUpdate(bookUrl)
-  local r = http_get(bookUrl)
-  if not r.success then return nil end
-  -- В JSON-LD: "dateModified":"2023-07-06T...". regex_match возвращает целое
-  -- совпадение, но группа нужна про запас (если движок отдаёт группы).
-  -- После даты в JSON идёт 'T', а не '"', поэтому кавычку не требуем.
-  local m = regex_match(r.body, '"dateModified":\\s*"(\\d\\d\\d\\d-\\d\\d-\\d\\d)')
+  local b = fetchBook(bookUrl)
+  if not b or not b.body then return nil end
+  local m = regex_match(b.body, '"dateModified":\\s*"(\\d\\d\\d\\d-\\d\\d-\\d\\d)')
   if m and m[1] then
     local d = string.match(m[1], '(%d%d%d%d%-%d%d%-%d%d)')
     if d then return d end
@@ -494,32 +488,6 @@ function getCatalogFiltered(index, filters)
 
   local r = http_get(url)
   if not r.success then return { items = {}, hasNext = false } end
-
-  local items = {}
-  for _, card in ipairs(html_select(r.body, ".fiction-list-item")) do
-    local titleEl = html_select_first(card.html, "h2 a")
-    if titleEl then
-      local bookUrl = absUrl(titleEl.href)
-      local cover   = html_attr(card.html, "img", "src")
-      -- Рейтинг из карточки: span.star[title="4.83"] либо div[aria-label="Rating: 4.83 out of 5"]
-      local rating = html_attr(card.html, "span.star[title]", "title")
-      if rating == "" then
-        local aria = html_attr(card.html, 'div[aria-label^="Rating:"]', "aria-label")
-        if aria ~= "" then
-          local m = regex_match(aria, "([\\d.]+)")
-          rating = m[1] or ""
-        end
-      end
-      local item = {
-        title = string_clean(titleEl.text),
-        url   = bookUrl,
-        cover = absUrl(cover)
-      }
-      -- Рейтинга в карточке нет ("Too Few Ratings") — ключ не добавляем (контракт)
-      if rating ~= "" then item.rating = rating end
-      table.insert(items, item)
-    end
-  end
-
+  local items = parseCards(r:toHtml())
   return { items = items, hasNext = #items > 0 }
 end
