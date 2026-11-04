@@ -1,7 +1,7 @@
 -- ── Метаданные ────────────────────────────────────────────────────────────────
 id       = "read_novel_full"
 name     = "ReadNovelFull"
-version  = "1.2.0"
+version  = "1.3.0"
 baseUrl  = "https://readnovelfull.com/"
 language = "en"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/readnovelfull.png"
@@ -74,8 +74,12 @@ function getCatalogList(index)
   local r = http_get(url)
   if not r.success then return { items = {}, hasNext = false } end
 
-  local items = parseCards(r:toHtml())
-  return { items = items, hasNext = #items > 0 }
+  local doc = r:toHtml()
+  local items = parseCards(doc)
+  local nextEl = doc:selectFirst(".pagination li.next:not(.disabled) a, .pagination .next a")
+  local hasNext = (nextEl ~= nil) or (#items >= 20)
+  if #items == 0 then hasNext = false end
+  return { items = items, hasNext = hasNext }
 end
 
 -- ── Поиск ─────────────────────────────────────────────────────────────────────
@@ -87,8 +91,12 @@ function getCatalogSearch(index, query)
   local r = http_get(url)
   if not r.success then return { items = {}, hasNext = false } end
 
-  local items = parseCards(r:toHtml())
-  return { items = items, hasNext = #items > 0 }
+  local doc = r:toHtml()
+  local items = parseCards(doc)
+  local nextEl = doc:selectFirst(".pagination li.next:not(.disabled) a, .pagination .next a")
+  local hasNext = (nextEl ~= nil) or (#items >= 20)
+  if #items == 0 then hasNext = false end
+  return { items = items, hasNext = hasNext }
 end
 
 -- ── Детали книги ──────────────────────────────────────────────────────────────
@@ -325,6 +333,10 @@ function getCatalogFiltered(index, filters)
   local r = http_get(url)
   if not r.success then return { items = {}, hasNext = false } end
 
-  local items = parseCards(r:toHtml())
-  return { items = items, hasNext = #items > 0 }
+  local doc = r:toHtml()
+  local items = parseCards(doc)
+  local nextEl = doc:selectFirst(".pagination li.next:not(.disabled) a, .pagination .next a")
+  local hasNext = (nextEl ~= nil) or (#items >= 20)
+  if #items == 0 then hasNext = false end
+  return { items = items, hasNext = hasNext }
 end

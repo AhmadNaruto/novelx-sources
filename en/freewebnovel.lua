@@ -1,6 +1,6 @@
 id       = "freewebnovel"
 name     = "FreeWebNovel"
-version  = "1.2.0"
+version  = "1.3.0"
 baseUrl  = "https://freewebnovel.com"
 language = "en"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/freewebnovel.png"
@@ -74,8 +74,12 @@ function getCatalogList(index)
   -- результатов (most-popular и search-adv отдают максимум 100).
   local r = http_get(catalogUrl("sort/latest-release", page))
   if not r.success then return { items = {}, hasNext = false } end
-  local items = parseItems(r:toHtml())
-  return { items = items, hasNext = #items > 0 }
+  local doc = r:toHtml()
+  local items = parseItems(doc)
+  local nextEl = doc:selectFirst("ul.pagination li.next:not(.disabled) a, .page a:contains(Next)")
+  local hasNext = (nextEl ~= nil) or (#items >= 20)
+  if #items == 0 then hasNext = false end
+  return { items = items, hasNext = hasNext }
 end
 
 function getCatalogSearch(index, query)
@@ -83,8 +87,12 @@ function getCatalogSearch(index, query)
   local url = baseUrl .. "/search?keyword=" .. url_encode(query) .. "&page=" .. tostring(page)
   local r = http_get(url)
   if not r.success then return { items = {}, hasNext = false } end
-  local items = parseItems(r:toHtml())
-  return { items = items, hasNext = #items > 0 }
+  local doc = r:toHtml()
+  local items = parseItems(doc)
+  local nextEl = doc:selectFirst("ul.pagination li.next:not(.disabled) a, .page a:contains(Next)")
+  local hasNext = (nextEl ~= nil) or (#items >= 20)
+  if #items == 0 then hasNext = false end
+  return { items = items, hasNext = hasNext }
 end
 
 function getBookTitle(bookUrl)
@@ -447,6 +455,10 @@ function getCatalogFiltered(index, filters)
 
   local r = http_get(baseUrl .. "/search-adv?" .. table.concat(parts, "&"))
   if not r.success then return { items = {}, hasNext = false } end
-  local items = parseItems(r:toHtml())
-  return { items = items, hasNext = #items > 0 }
+  local doc = r:toHtml()
+  local items = parseItems(doc)
+  local nextEl = doc:selectFirst("ul.pagination li.next:not(.disabled) a, .page a:contains(Next)")
+  local hasNext = (nextEl ~= nil) or (#items >= 20)
+  if #items == 0 then hasNext = false end
+  return { items = items, hasNext = hasNext }
 end
