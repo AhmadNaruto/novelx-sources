@@ -1,7 +1,7 @@
 -- ── Метаданные ───────────────────────────────────────────────────────────────
 id       = "shuba69"
 name     = "69shuba"
-version  = "1.0.3"
+version  = "1.1.0"
 baseUrl  = "https://www.69shuba.com/"
 language = "zh"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/69shuba.png"
@@ -29,9 +29,68 @@ end
 
 -- ── Каталог ──────────────────────────────────────────────────────────────────
 
+function getFilterList()
+    return {
+        {
+            type         = "select",
+            key          = "sort",
+            label        = "排序 / Sort",
+            defaultValue = "monthvisit",
+            options = {
+                { value = "monthvisit", label = "月点击榜 (Monthly)" },
+                { value = "allvisit",   label = "总点击榜 (All Time)" },
+                { value = "weekvisit",  label = "周点击榜 (Weekly)" },
+                { value = "dayvisit",   label = "日点击榜 (Daily)" },
+                { value = "postdate",   label = "最新入库 (Newest)" },
+                { value = "lastupdate", label = "最近更新 (Recently Updated)" },
+                { value = "goodnum",    label = "总收藏榜 (Favorites)" },
+            }
+        },
+        {
+            type         = "select",
+            key          = "category",
+            label        = "分类 / Category",
+            defaultValue = "0",
+            options = {
+                { value = "0",  label = "全部分类 (All)" },
+                { value = "1",  label = "玄幻魔法 (Fantasy)" },
+                { value = "2",  label = "修真武侠 (Xianxia / Wuxia)" },
+                { value = "3",  label = "都市言情 (Urban / Romance)" },
+                { value = "4",  label = "历史军事 (Historical / Military)" },
+                { value = "5",  label = "游戏竞技 (Games / Esports)" },
+                { value = "6",  label = "科幻空间 (Sci-Fi)" },
+                { value = "7",  label = "悬疑惊悚 (Suspense / Thriller)" },
+                { value = "8",  label = "同人小说 (Fanfiction)" },
+                { value = "9",  label = "官场职场 (Workplace)" },
+                { value = "10", label = "青春校园 (School Life)" },
+                { value = "11", label = "穿越时空 (Transmigration)" },
+                { value = "12", label = "豪门总裁 (Rich CEO)" },
+            }
+        },
+        {
+            type         = "select",
+            key          = "status",
+            label        = "状态 / Status",
+            defaultValue = "0",
+            options = {
+                { value = "0", label = "全部 (All)" },
+                { value = "1", label = "连载中 (Ongoing)" },
+                { value = "2", label = "已完结 (Completed)" },
+            }
+        }
+    }
+end
+
 function getCatalogList(index)
+    return getCatalogFiltered(index, {})
+end
+
+function getCatalogFiltered(index, filters)
     local page = index + 1
-    local url = baseUrl .. "novels/monthvisit_0_0_" .. tostring(page) .. ".htm"
+    local sort = (filters and filters["sort"]) or "monthvisit"
+    local cat  = (filters and filters["category"]) or "0"
+    local stat = (filters and filters["status"]) or "0"
+    local url  = baseUrl .. "novels/" .. sort .. "_" .. cat .. "_" .. stat .. "_" .. tostring(page) .. ".htm"
     
     local r = http_get(url, { charset = "GBK" })
     if not r.success then return { items = {}, hasNext = false } end

@@ -1,7 +1,7 @@
 -- ── Metadata ────────────────────────────────────────────────────────────────
 id       = "biquge_company"
 name     = "BiqugeCompany"
-version  = "1.0.2"
+version  = "1.1.0"
 baseUrl  = "https://www.biquge.company/"
 language = "zh"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/biquge_company.png"
@@ -105,11 +105,54 @@ local function applyStandardContentTransforms(text)
 end
 
 -- ── Catalog ─────────────────────────────────────────────────────────────────
--- /sort/0/{page}.html — "书库" (full library). catId=0 means all categories.
+
+function getFilterList()
+  return {
+    {
+      type         = "select",
+      key          = "mode",
+      label        = "浏览模式 / Mode",
+      defaultValue = "sort",
+      options = {
+        { value = "sort",    label = "分类书库 (Categories)" },
+        { value = "quanben", label = "完本小说 (Completed)" },
+      }
+    },
+    {
+      type         = "select",
+      key          = "category",
+      label        = "分类 / Category",
+      defaultValue = "0",
+      options = {
+        { value = "0", label = "全部分类 (All)" },
+        { value = "1", label = "玄幻奇幻 (Fantasy)" },
+        { value = "2", label = "修真仙侠 (Xianxia)" },
+        { value = "3", label = "都市言情 (Urban / Romance)" },
+        { value = "4", label = "历史军事 (Historical / Military)" },
+        { value = "5", label = "游戏竞技 (Games / Esports)" },
+        { value = "6", label = "科幻灵异 (Sci-Fi / Supernatural)" },
+        { value = "7", label = "恐怖悬疑 (Horror / Suspense)" },
+        { value = "8", label = "其他类型 (Other)" },
+      }
+    }
+  }
+end
 
 function getCatalogList(index)
+  return getCatalogFiltered(index, {})
+end
+
+function getCatalogFiltered(index, filters)
   local page = index + 1
-  local url = baseUrl .. "sort/0/" .. tostring(page) .. ".html"
+  local mode = (filters and filters["mode"]) or "sort"
+  local cat  = (filters and filters["category"]) or "0"
+  local url
+  if mode == "quanben" then
+    url = baseUrl .. "quanben/" .. tostring(page) .. ".html"
+  else
+    url = baseUrl .. "sort/" .. cat .. "/" .. tostring(page) .. ".html"
+  end
+
   local r = http_get(url)
   if not r.success then return { items = {}, hasNext = false } end
 
@@ -132,7 +175,7 @@ function getCatalogList(index)
 
   -- hasNext: look for a "下一页" link.
   local hasNext = false
-  for _, a in ipairs(html_select(r.body, ".page a, a[href*='sort']")) do
+  for _, a in ipairs(html_select(r.body, ".page a, a[href*='sort'], a[href*='quanben']")) do
     local txt = string_clean(a.text)
     if txt == "下一页" or txt == "下页" or txt == "»" or txt == "Next" then
       hasNext = true

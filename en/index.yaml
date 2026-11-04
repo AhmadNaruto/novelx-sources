@@ -103,7 +103,7 @@ sources:
     language: "en"
   - id: "novelhall"
     name: "NovelHall"
-    version: "1.0.3"
+    version: "1.1.0"
     url: "https://raw.githubusercontent.com/HnDK0/external-sources/refs/heads/main/en/novelhall.lua"
     icon: "https://raw.githubusercontent.com/HnDK0/external-sources/refs/heads/main/icons/novelhall.png"
     language: "en"

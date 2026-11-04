@@ -1,7 +1,7 @@
 -- ── Метаданные ────────────────────────────────────────────────────────────────
 id       = "twkan"
 name     = "TWKan"
-version  = "1.0.1"
+version  = "1.1.0"
 baseUrl  = "https://twkan.com/"
 language = "zh"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/twkan.png"
@@ -28,14 +28,67 @@ end
 
 -- ── Каталог ───────────────────────────────────────────────────────────────────
 
+function getFilterList()
+  return {
+    {
+      type         = "select",
+      key          = "sort",
+      label        = "排序 / Sort",
+      defaultValue = "newhot",
+      options = {
+        { value = "newhot",     label = "熱門榜 (Hot)" },
+        { value = "monthvisit", label = "月點擊榜 (Monthly)" },
+        { value = "allvisit",   label = "總點擊榜 (All Time)" },
+        { value = "weekvisit",  label = "周點擊榜 (Weekly)" },
+        { value = "postdate",   label = "最新發布 (Newest)" },
+        { value = "lastupdate", label = "最近更新 (Recently Updated)" },
+      }
+    },
+    {
+      type         = "select",
+      key          = "category",
+      label        = "分類 / Category",
+      defaultValue = "0",
+      options = {
+        { value = "0",  label = "全部分類 (All)" },
+        { value = "1",  label = "玄幻魔法 (Fantasy)" },
+        { value = "2",  label = "修真武俠 (Wuxia / Xianxia)" },
+        { value = "3",  label = "都市言情 (Urban / Romance)" },
+        { value = "4",  label = "歷史軍事 (Historical / Military)" },
+        { value = "5",  label = "遊戲競技 (Games / Esports)" },
+        { value = "6",  label = "科幻空間 (Sci-Fi)" },
+        { value = "7",  label = "懸疑驚悚 (Suspense / Thriller)" },
+        { value = "8",  label = "同人小說 (Fanfiction)" },
+        { value = "9",  label = "官場職場 (Workplace)" },
+        { value = "10", label = "青春校園 (School Life)" },
+        { value = "11", label = "穿越時空 (Transmigration)" },
+        { value = "12", label = "豪門總裁 (Rich CEO)" },
+      }
+    },
+    {
+      type         = "select",
+      key          = "status",
+      label        = "狀態 / Status",
+      defaultValue = "0",
+      options = {
+        { value = "0", label = "全部 (All)" },
+        { value = "1", label = "連載 (Ongoing)" },
+        { value = "2", label = "完本 (Completed)" },
+      }
+    }
+  }
+end
+
 function getCatalogList(index)
+  return getCatalogFiltered(index, {})
+end
+
+function getCatalogFiltered(index, filters)
   local page = index + 1
-  local url
-  if page == 1 then
-    url = "https://twkan.com/novels/newhot_2_0_1.html"
-  else
-    url = "https://twkan.com/novels/newhot_2_0_" .. tostring(page) .. ".html"
-  end
+  local sort = (filters and filters["sort"]) or "newhot"
+  local cat  = (filters and filters["category"]) or "0"
+  local stat = (filters and filters["status"]) or "0"
+  local url  = baseUrl .. "novels/" .. sort .. "_" .. cat .. "_" .. stat .. "_" .. tostring(page) .. ".html"
 
   local r = http_get(url)
   if not r.success then return { items = {}, hasNext = false } end

@@ -1,6 +1,6 @@
 id       = "novelhall"
 name     = "NovelHall"
-version  = "1.0.3"
+version  = "1.1.0"
 baseUrl  = "https://www.novelhall.com"
 language = "en"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/novelhall.png"
@@ -38,9 +38,33 @@ end
 
 -- ── Каталог ───────────────────────────────────────────────────────────────────
 
+function getFilterList()
+    return {
+        {
+            type         = "select",
+            key          = "category",
+            label        = "Category / Ranking",
+            defaultValue = "completed",
+            options = {
+                { value = "completed",  label = "Completed" },
+                { value = "ranking",    label = "Power Ranking" },
+                { value = "trending",   label = "Trending Ranking" },
+                { value = "new",        label = "New Novel" },
+                { value = "lastupdate", label = "Latest Release" },
+                { value = "all2022",    label = "All Novels" },
+            }
+        }
+    }
+end
+
 function getCatalogList(index)
+    return getCatalogFiltered(index, {})
+end
+
+function getCatalogFiltered(index, filters)
     local page = index + 1
-    local url = (page == 1) and (baseUrl .. "/completed.html") or (baseUrl .. "/completed-" .. page .. ".html")
+    local cat  = (filters and filters["category"]) or "completed"
+    local url  = (page == 1) and (baseUrl .. "/" .. cat .. ".html") or (baseUrl .. "/" .. cat .. "-" .. page .. ".html")
 
     local r = http_get(url)
     if not r.success then return { items = {}, hasNext = false } end

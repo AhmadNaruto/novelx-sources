@@ -1,7 +1,7 @@
 -- ── Метаданные ────────────────────────────────────────────────────────────────
 id       = "quanben5"
 name     = "Quanben5"
-version  = "1.0.5"
+version  = "1.1.0"
 baseUrl  = "https://big5.quanben5.com/"
 language = "zh"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/quanben5.png"
@@ -109,13 +109,65 @@ end
 
 -- ── Каталог ───────────────────────────────────────────────────────────────────
 
+function getFilterList()
+  return {
+    {
+      type         = "select",
+      key          = "type",
+      label        = "浏览方式 / Mode",
+      defaultValue = "category",
+      options = {
+        { value = "category",   label = "分类浏览 (Categories)" },
+        { value = "allvisit",   label = "总点击榜 (All Time)" },
+        { value = "monthvisit", label = "月点击榜 (Monthly)" },
+        { value = "goodnum",    label = "总收藏榜 (Favorites)" },
+        { value = "postdate",   label = "最新入库 (Newest)" },
+      }
+    },
+    {
+      type         = "select",
+      key          = "category",
+      label        = "分类 / Category",
+      defaultValue = "1",
+      options = {
+        { value = "1",  label = "玄幻魔法 (Fantasy)" },
+        { value = "2",  label = "武侠修真 (Wuxia / Xianxia)" },
+        { value = "3",  label = "纯爱耽美 (Danmei / BL)" },
+        { value = "4",  label = "都市言情 (Urban / Romance)" },
+        { value = "5",  label = "职场官场 (Workplace)" },
+        { value = "6",  label = "穿越重生 (Transmigration)" },
+        { value = "7",  label = "历史军事 (Historical / Military)" },
+        { value = "8",  label = "网游动漫 (Gaming / Anime)" },
+        { value = "9",  label = "恐怖灵异 (Horror / Supernatural)" },
+        { value = "10", label = "科幻小说 (Sci-Fi)" },
+        { value = "11", label = "美文同人 (Fanfiction)" },
+        { value = "12", label = "青春校园 (Youth / School)" },
+      }
+    }
+  }
+end
+
 function getCatalogList(index)
+  return getCatalogFiltered(index, {})
+end
+
+function getCatalogFiltered(index, filters)
   local page = index + 1
+  local mode = (filters and filters["type"]) or "category"
+  local cat  = (filters and filters["category"]) or "1"
   local url
-  if page == 1 then
-    url = baseUrl .. "category/1.html"
+  if mode == "category" then
+    if page == 1 then
+      url = baseUrl .. "category/" .. cat .. ".html"
+    else
+      url = baseUrl .. "category/" .. cat .. "_" .. tostring(page) .. ".html"
+    end
   else
-    url = baseUrl .. "category/1_" .. tostring(page) .. ".html"
+    if page == 1 then
+      url = baseUrl .. "top/" .. mode .. "/1.html"
+    else
+      url = baseUrl .. "top/" .. mode .. "/" .. tostring(page) .. ".html"
+    end
   end
 
   local r = http_get(url)
